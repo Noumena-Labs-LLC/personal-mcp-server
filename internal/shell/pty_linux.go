@@ -13,11 +13,11 @@ import (
 	"syscall"
 )
 
-func openPty() (*os.File, *os.File, error) {
+func openPty() (masterFile, slaveFile *os.File, err error) {
 	var master C.int
 	var slave C.int
-	if _, err := C.openpty(&master, &slave, nil, nil, nil); err != nil {
-		return nil, nil, fmt.Errorf("openpty: %w", err)
+	if rc := C.openpty(&master, &slave, nil, nil, nil); rc != 0 {
+		return nil, nil, fmt.Errorf("openpty failed with return code %d", int(rc))
 	}
 	return os.NewFile(uintptr(master), "personal-mcp-server-pty-master"), os.NewFile(uintptr(slave), "personal-mcp-server-pty-slave"), nil
 }
