@@ -93,17 +93,18 @@ linters:
         - name: unused-parameter
         - name: unreachable-code
         - name: redefines-builtin-id
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - exhaustive
+          - unparam
+      - path: cmd/personal-mcp-server/main.go
+        linters:
+          - gocritic
+        text: "exitAfterDefer"
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - exhaustive
-        - unparam
-    - path: cmd/personal-mcp-server/main.go
-      linters:
-        - gocritic
-      text: "exitAfterDefer"
