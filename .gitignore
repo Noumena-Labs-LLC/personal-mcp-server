@@ -1,0 +1,48 @@
+# Go build artifacts
+/personal-mcp-server
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+coverage.out
+coverage.html
+
+# Dependency/vendor/cache
+.tools/
+/vendor/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local config and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.sample
+*.local.json
+*.local.toml
+*.local.yaml
+configs/local.*
+
+# Runtime files
+*.log
+*.pid
+/tmp/
+/.tmp/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude / MCP local state
+.audit/

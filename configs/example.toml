@@ -1,0 +1,558 @@
+# personal-mcp-server example configuration.
+# This server is intentionally localhost-only. Do not bind it to 0.0.0.0.
+# Use documented snake_case TOML keys. The loader accepts common CamelCase aliases
+# for model ergonomics, but snake_case is canonical and wins on conflicts.
+
+config_version = 1
+roots = ["."]
+
+[defaults]
+# Optional single-user convenience mode. When true, absent safety defaults become permissive:
+# built-in tools default enabled, approval defaults disabled, and command/file policy defaults allow.
+# Explicit settings elsewhere in this config still win.
+allow_everything = false
+
+[server]
+host = "127.0.0.1"
+port = 3929
+endpoint = "/mcp"
+auth_token_env = "PERSONAL_MCP_TOKEN"
+# Alternatively, use auth_token_file = "~/.personal-mcp-server/config/token" for GUI-launched clients.
+validate_origin = true
+allowed_origins = ["http://127.0.0.1", "http://localhost"]
+
+[server_logging]
+# Diagnostic server logs. Audit logs remain separate.
+# When path is set, diagnostics go to the file; error-level diagnostics are also duplicated to stderr.
+# Rotated files are kept as server.log.1, server.log.2, and so on.
+level = "info"
+path = ""
+max_bytes = 10485760
+max_backups = 5
+# Tool calls at or above these thresholds are logged to diagnostics as slow/very slow.
+tool_slow_ms = 3000
+tool_very_slow_ms = 10000
+
+[audit]
+# Optional. If omitted, audit logs go to stderr unless --audit-log is provided.
+path = ""
+max_bytes = 10485760
+max_backups = 5
+
+[feedback]
+# Local-only feedback collection. feedback_submit appends JSONL here and never sends network data.
+enabled = true
+path = "~/.personal-mcp-server/feedback/feedback.jsonl"
+max_summary_bytes = 500
+max_details_bytes = 4000
+max_context_bytes = 12000
+
+[project_configs]
+enabled = true
+filename = ".personal-mcp-server.toml"
+auto_load = false
+trust_store = "~/.personal-mcp-server/config/trusted-projects.toml"
+
+
+# Machine-level read/search/output limits. Project configs cannot raise these values.
+# max_write_bytes is retained for config compatibility; write/delete/move tools no longer use it as a gate.
+[limits]
+max_read_bytes = 200000
+max_write_bytes = 50000
+max_search_results = 100
+max_search_file_bytes = 1000000
+command_timeout_seconds = 20
+max_command_output_bytes = 200000
+diff_context_lines = 3
+max_diff_bytes = 200000
+max_patch_bytes = 200000
+
+[secrets]
+deny_names = [
+  ".env",
+  ".env.local",
+  ".env.production",
+  "id_rsa",
+  "id_ed25519",
+  "credentials",
+  "known_hosts",
+]
+deny_extensions = [".pem", ".key", ".p12", ".pfx"]
+
+[tools.fs_list_roots]
+enabled = true
+description = """
+List configured filesystem roots. Returns only roots explicitly configured for this server.
+Use this first when you need to know the workspace boundaries.
+"""
+
+[tools.fs_list_dir]
+enabled = true
+description = """
+List entries under a directory inside configured roots. Bounded by max_entries and does not follow symlinks outside roots.
+Use this to inspect project structure before reading files. Pass cwd when working inside a subdirectory under a larger root.
+"""
+
+[tools.fs_get_file_info]
+enabled = true
+description = """
+Get safe metadata for a file or directory inside configured roots without reading contents.
+Use this to check size/type, text sniffing, and large-file navigation hints before reading.
+"""
+
+[tools.fs_tail_file]
+enabled = true
+description = """
+Read the last lines of a text or log file inside configured roots without scanning from the beginning.
+Use this for logs and recent diagnostics before bounded fs_read_file ranges.
+"""
+
+[tools.fs_read_file]
+enabled = true
+description = """
+Read a bounded line range from a text file inside configured roots.
+Rejects denied secret files, binary files, and paths outside configured roots.
+Prefer specific line ranges instead of large reads. Do not use whole_file=true on large files unless explicitly necessary. Pass cwd when path should be resolved relative to a project directory.
+"""
+
+[tools.fs_search_text]
+enabled = true
+description = """
+Search text files inside configured roots. Plain substring search by default, regex optional.
+Searches are bounded by file-size and result-count limits and skip denied files. Pass cwd to search inside a project under a larger root.
+"""
+
+[tools.fs_find]
+enabled = true
+description = """
+Find files and directories inside configured roots using Go-native glob filters.
+Use this instead of shell find. Supports cwd, max_depth, include/exclude globs, and result caps.
+"""
+
+[tools.fs_replace_regex]
+enabled = true
+description = """
+Go-native sed-like regex replacement in one file.
+Supports line ranges, optional dry_run previews, and max_replacements. Does not call external sed.
+"""
+
+[tools.fs_apply_patch]
+enabled = true
+description = """
+Apply exact old/new text patches to one file inside configured roots.
+Supports optional dry_run previews. Requires expected_replacements to prevent accidental broad edits. Pass cwd when patching a path relative to a project directory.
+Supports either one old/new replacement or an edits array for multiple hunks.
+"""
+
+[tools.fs_apply_unified_patch]
+enabled = true
+description = """
+Apply a standard unified diff patch inside configured roots.
+Supports optional dry_run previews. Deletes, renames, binary patches, and paths outside roots are rejected. Pass cwd to apply patch paths relative to a project directory.
+"""
+
+[tools.fs_create_file]
+enabled = false
+description = """
+Create a new text file inside configured roots. Refuses to overwrite existing files. Pass cwd when creating relative to a project directory.
+Keep disabled until you want Claude to create new files, not just patch existing ones.
+"""
+
+[tools.fs_create_dir]
+enabled = false
+description = """
+Create a directory inside configured roots with mkdir -p semantics by default. Refuses file conflicts and supports dry_run.
+"""
+
+[tools.fs_replace_file]
+enabled = false
+description = """
+Replace one existing text file inside configured roots. Refuses directories and binary files, supports create_backup, and returns compact diffs.
+Use for intentional whole-file overwrites; use fs_create_file for new files and fs_apply_patch for targeted edits.
+"""
+
+[tools.fs_delete_file]
+enabled = false
+description = """
+Delete one existing file inside configured roots. Refuses directories.
+"""
+
+[tools.fs_delete_files]
+enabled = false
+description = """
+Delete multiple files inside configured roots. Refuses directories and enforces max_files.
+"""
+
+[tools.fs_move_file]
+enabled = false
+description = """
+Move or rename one existing file inside configured roots. Refuses directories and refuses destination overwrites unless overwrite=true.
+"""
+
+[tools.fs_append_file]
+enabled = false
+description = """
+Append text to an existing file, or create it when create_if_missing=true. Use dry_run=true only when a preview is useful.
+"""
+
+[tools.md_outline]
+enabled = true
+description = """
+Return Markdown headings and section line ranges without reading the full file into the model.
+"""
+
+[tools.md_read_section]
+enabled = true
+description = """
+Read one Markdown section by heading id or title. Use md_outline first to discover stable section ids.
+"""
+
+[tools.md_replace_section]
+enabled = false
+description = """
+Replace one Markdown section body by heading id or title. Supports optional dry_run previews.
+"""
+
+[tools.md_replace_section_heading]
+enabled = false
+description = """
+Rename or relevel one Markdown section heading without replacing its body. Use md_outline first; dry_run=true is optional for preview.
+"""
+
+[tools.md_insert_section]
+enabled = false
+description = """
+Insert a Markdown section before or after an existing heading. Enable only when documentation edits are allowed.
+"""
+
+[tools.md_append_section]
+enabled = false
+description = """
+Append a new Markdown section to a document. Prefer this over raw append for docs updates.
+"""
+
+[tools.md_append_subsection]
+enabled = false
+description = """
+Append a child subsection under an existing Markdown section. Use md_outline first; dry_run=true is optional for preview.
+"""
+
+[tools.json_outline]
+enabled = true
+[tools.json_keys]
+enabled = true
+[tools.json_get]
+enabled = true
+[tools.json_slice]
+enabled = true
+[tools.json_search]
+enabled = true
+[tools.json_validate]
+enabled = true
+[tools.jsonl_info]
+enabled = true
+[tools.jsonl_read]
+enabled = true
+[tools.jsonl_tail]
+enabled = true
+[tools.jsonl_filter]
+enabled = true
+[tools.jsonl_validate]
+enabled = true
+[tools.feedback_submit]
+enabled = true
+[tools.diagnostics_recent_slow_tools]
+enabled = true
+[tools.config_validate]
+enabled = true
+[tools.config_explain]
+enabled = true
+[tools.git_diff]
+enabled = true
+description = """
+Return a bounded git diff for a file or directory inside an allowed root.
+This is safer and more predictable than using a generic command to inspect diffs. Pass cwd to discover the nearest repository from a project directory.
+"""
+
+[tools.git_status]
+enabled = true
+description = """
+Return structured git working-tree status, including untracked files when requested.
+Use this before git_diff when you need to discover new files.
+"""
+
+[tools.cmd_run_named]
+enabled = true
+description = """
+Run one named, allowlisted command from config.
+Does not accept raw shell commands, arbitrary arguments, PID management, or shell job control. Use cmd_start_named for server-supervised background jobs.
+Use for tests, formatters, git status, and git diff when configured.
+"""
+
+[tools.cmd_run_sequence]
+enabled = false
+description = """
+Run a configured sequence of named commands in order. Use mode=stop_on_failure for &&-like behavior or mode=continue for ;-like behavior.
+Sequences are config-defined only and do not accept raw shell chaining syntax.
+"""
+
+[tools.cmd_run_argv]
+enabled = false
+description = """
+Run an argv-style command if command_policy allows it or after approval.
+This does not run through a shell; pipes, redirects, glob expansion, and shell-managed background jobs are not supported.
+"""
+
+[tools.server_info]
+enabled = true
+description = """
+Return personal MCP server server version, module path, transport, feature summary, and large-file usage guidance.
+Call this first when reporting bugs or learning server capabilities.
+"""
+
+[tools.tool_catalog]
+enabled = true
+description = """
+Return a hierarchical catalog of personal MCP server tools grouped by workflow category.
+Use this after server_info when the flat tools/list output is too hard to navigate.
+"""
+
+[tools.policy_describe]
+enabled = true
+description = """
+Describe effective personal MCP server policy: roots, enabled tools, file policy, command policy, and approval behavior.
+Call this before using file mutation or command tools.
+"""
+
+[tools.project_info]
+enabled = true
+description = """
+Discover the nearest .personal-mcp-server.toml for a cwd and report trust status, project commands, workflows, and guidance.
+Call this at the start of a project session.
+"""
+
+[tools.project_config_describe]
+enabled = true
+description = """
+Return LLM-readable guidance for creating and understanding .personal-mcp-server.toml project configs.
+"""
+
+[tools.setup_guide]
+enabled = true
+description = """
+Return LLM-readable setup guidance for macOS, Linux, Claude Desktop, services, logs, and troubleshooting.
+"""
+
+[tools.guide_list]
+enabled = true
+description = """
+List embedded LLM-readable setup, project, troubleshooting, and docs guides available through guide_read.
+"""
+
+[tools.guide_read]
+enabled = true
+description = """
+Read one embedded LLM-readable guide by name. Use this because some MCP clients do not expose resources to the model.
+"""
+
+[tools.cmd_explain_policy]
+enabled = true
+description = """
+Explain whether an argv-style command would be allowed, denied, or require approval without running it.
+"""
+
+[tools.file_explain_policy]
+enabled = true
+description = """
+Explain whether a file operation would be allowed, denied, or require approval without performing it.
+"""
+
+[tools.resource_list]
+enabled = true
+description = """
+List personal MCP resource URIs and templates for clients that do not expose MCP resources directly.
+"""
+
+[tools.resource_read]
+enabled = true
+description = """
+Read one personal-mcp:// resource by URI. Mirrors MCP resources for tool-only clients such as Claude Desktop.
+"""
+
+# Prompt-required operations are approved through the local approval CLI/HTTP endpoints; no native OS dialog is shown.
+[approval]
+enabled = true
+timeout_seconds = 120
+default_on_timeout = "deny"
+remember_session_decisions = false
+
+[file_policy]
+read_default = "allow"
+write_default = "deny"
+create_default = "prompt"
+patch_default = "prompt"
+unified_patch_default = "prompt"
+
+[[file_policy.rules]]
+name = "deny secrets"
+action = "deny"
+operations = ["read", "list", "info", "search", "patch", "unified_patch", "create", "write", "delete"]
+pattern = "(^|/)(\\.env|id_rsa|id_ed25519|credentials)(\\.|$|/)"
+
+[[file_policy.rules]]
+name = "allow source edits"
+action = "allow"
+operations = ["patch", "unified_patch", "create", "delete"]
+pattern = "\\.(go|md|toml|json|yaml|yml|txt)$"
+
+[command_policy]
+default = "prompt"
+
+[[command_policy.rules]]
+name = "deny destructive commands"
+action = "deny"
+exec_regex = "^(rm|shred|sudo|chmod|chown)$"
+args_regex = ".*"
+
+[[command_policy.rules]]
+name = "allow git read-only"
+action = "allow"
+exec = "git"
+subcommands = ["status", "diff", "log", "show", "branch"]
+
+[[command_policy.rules]]
+name = "prompt other git commands"
+action = "prompt"
+exec = "git"
+args_regex = ".*"
+
+[command_environment]
+# Named commands run as direct argv by default and inherit the server process environment, not your interactive shell.
+# Set allow_persistent_shell=true only when trusted project commands need shell startup behavior such as pyenv/asdf/nvm/direnv.
+allow_persistent_shell = false
+allowed_shells = ["/bin/zsh", "/bin/bash"]
+# Persistent shell sessions are pooled per trusted project root + shell path.
+# A busy pool waits briefly for an idle session before returning a busy timeout.
+persistent_shell_pool_size = 2
+persistent_shell_acquire_timeout_seconds = 6
+
+[[commands]]
+name = "git-status"
+exec = "git"
+args = ["status", "--short"]
+description = "Show concise working tree status."
+# Optional default cwd. Used only when the tool call omits cwd; tool-call cwd wins.
+# Global command cwd may be absolute or root-relative, but it must stay inside configured roots.
+# cwd = "/path/to/repo"
+
+[[commands]]
+name = "git-diff"
+exec = "git"
+args = ["diff"]
+description = "Show unstaged changes."
+
+[[commands]]
+name = "git-log"
+exec = "git"
+args = ["log", "--oneline", "-20"]
+description = "Show recent commits."
+
+[[commands]]
+name = "git-add-all"
+exec = "git"
+args = ["add", "."]
+description = "Stage all changes in the current repository."
+
+[[commands]]
+name = "git-commit"
+exec = "git"
+args = ["commit", "--verbose"]
+description = "Create a commit from staged changes. For commit messages, prefer cmd_run_argv when policy allows git commit -m."
+
+[[commands]]
+name = "go-test"
+exec = "go"
+args = ["test", "./..."]
+description = "Run the full Go test suite."
+# The default argv runner uses a stripped environment, not your interactive shell.
+# Add fixed environment values with [commands.env] or selected host env vars with env_from_host.
+# env_from_host = ["GOMODCACHE"]
+# Trusted project commands can opt into run_mode = "persistent_shell" when global command_environment allows it.
+# Project configs can also set [command_environment] run_mode and shell defaults for all commands in that project.
+# Project command cwd values must be relative to the trusted project root; tool-call cwd still wins when supplied.
+
+[[commands]]
+name = "go-vet"
+exec = "go"
+args = ["vet", "./..."]
+description = "Run go vet across all packages."
+
+# Example of a flexible named command. extra_args are allowed only when they match one of the declared rules.
+[[commands]]
+name = "pytest"
+exec = "python"
+args = ["-m", "pytest"]
+description = "Run pytest with optional test path and common flags."
+allow_extra_args = true
+max_extra_args = 10
+
+[[commands.extra_args]]
+kind = "path"
+allow_globs = ["tests/**", "src/**"]
+must_exist = true
+
+[[commands.extra_args]]
+kind = "enum"
+values = ["-q", "-v", "-x", "--maxfail=1"]
+
+[prompts.safe_code_edit]
+enabled = true
+description = "Safely inspect, patch, and verify code inside allowed roots."
+template = """
+Use personal MCP server carefully.
+
+Rules:
+- Work only inside the configured roots.
+- Start by calling server_info, tool_catalog_categories, guide_list, and policy_describe or reading personal-mcp://policy and personal-mcp://guide/tools.
+- Search before reading broadly.
+- Read bounded line ranges, not huge files.
+- Do not request denied secret files.
+- For edits, call fs_apply_patch or fs_apply_unified_patch for scoped changes and verify afterward.
+- Explain the diff before applying non-trivial changes.
+- After applying changes, call git_diff and a named verification command when available.
+- Do not use cmd_run_named or cmd_run_argv unless the command is clearly relevant to the user's request and allowed by policy or approved.
+"""
+
+[prompts.inspect_project]
+enabled = true
+description = "Read-only project inspection workflow."
+template = """
+Inspect the project using personal MCP server without modifying files.
+
+Workflow:
+1. Call server_info, tool_catalog_categories, guide_list, and policy_describe, then read personal-mcp://roots and personal-mcp://guide/tools when resources are available.
+2. Use fs_list_dir to understand the top-level structure.
+3. Use fs_search_text to find relevant files or symbols.
+4. Use fs_get_file_info before reading unknown files and fs_tail_file for recent log output.
+5. Use fs_read_file with bounded line ranges.
+
+Do not call fs_apply_patch, fs_create_file, cmd_run_named, or cmd_run_argv. Summarize what you inspected and recommend next steps.
+"""
+
+[prompts.edit_and_verify]
+enabled = true
+description = "Make a scoped edit, show the diff, and run configured verification commands."
+template = """
+Make the requested code change using personal MCP server.
+
+Workflow:
+1. Call server_info, tool_catalog_categories, and policy_describe, then stay inside configured roots.
+2. Inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file.
+3. Use fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful, and review the diff.
+4. Apply the patch only when the intended change is clear.
+5. Call git_diff to review the final diff.
+6. Run an available named or policy-allowed verification command such as just-ci, just-test, go-test, go-vet, or cmd_run_argv when allowed.
+7. Summarize files changed and verification results.
+"""
+
+# Tools that accept paths also accept optional cwd and path_mode. cwd is per-call only and must resolve inside roots. path_mode can be auto, absolute, root_relative, or cwd_relative.

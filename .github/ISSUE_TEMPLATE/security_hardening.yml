@@ -1,0 +1,22 @@
+name: Security hardening
+description: Suggest a hardening improvement that is not an urgent vulnerability
+labels: [security, hardening]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    id: threat
+    attributes:
+      label: Threat or failure mode
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: false

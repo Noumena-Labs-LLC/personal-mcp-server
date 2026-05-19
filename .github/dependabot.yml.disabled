@@ -1,0 +1,26 @@
+# Disabled for early development to avoid Dependabot branch/PR noise.
+# To re-enable before open-sourcing, rename this file to:
+#   .github/dependabot.yml
+#
+# This quieter configuration groups updates and runs monthly.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      github-actions:
+        patterns:
+          - "*"
