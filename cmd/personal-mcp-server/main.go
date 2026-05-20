@@ -39,7 +39,7 @@ import (
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/shell"
 )
 
-const version = "0.5.7-rc17"
+const version = "0.5.7"
 
 //go:embed guides/*.md
 var guideFS embed.FS
