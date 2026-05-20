@@ -2,6 +2,25 @@
 
 A localhost-only MCP server for controlled local filesystem access and named command execution. It uses the official `github.com/modelcontextprotocol/go-sdk` Streamable HTTP server transport.
 
+## Why this exists
+
+personal-mcp-server was built for Claude Desktop users who want local filesystem, structured-data, and command workflows without relying on stdio-only MCP servers.
+
+The common alternatives, such as desktop command tools and filesystem servers, usually run over stdio. That works for small requests, but it can become fragile when request or response payloads get large. Wrapping stdio servers with a proxy can help, but it does not fully address the underlying ergonomics and reliability problems.
+
+This project is built from the ground up around Streamable HTTP MCP. It is meant to be a local, long-running, localhost-only server that handles larger local workflows more predictably, exposes clearer diagnostics, and gives models navigation-first tools instead of encouraging whole-file reads.
+
+The main use case is trusted personal/local automation:
+
+- local filesystem navigation and edits under configured roots
+- Markdown section navigation and editing
+- JSON and JSONL navigation, validation, search, and filtering
+- named command execution without exposing raw shell strings
+- per-project/repo `.personal-mcp-server.toml` configs
+- local diagnostics, audit logs, and feedback records
+
+The default posture is intentionally low-friction for a single-user local machine. Security controls still exist — localhost binding, bearer-token auth, Host and Origin validation, roots, file policy, secret-name deny rules, command policy, and bounded read/search outputs — and users can tighten the policy when they want a more restrictive setup.
+
 Design goals:
 
 - Bind only to `127.0.0.1` / localhost
