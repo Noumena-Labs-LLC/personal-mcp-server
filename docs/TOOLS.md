@@ -28,7 +28,6 @@ MCP `tools/list` is a flat protocol response. personal-mcp-server keeps that fla
 
 Catalog responses include each tool's enabled/read-only status, feature requirement when applicable, and safety notes. Some tools are feature-gated by config and may be documented even when not registered in the current build/config; check `server_info.features`, `policy_describe.cwd.disabled_tools`, and catalog `enabled` fields before relying on `fs_tree`, `fs_find`, `fs_replace_regex`, or `fs_apply_unified_patch`. It is guidance only; enforcement still comes from Go policy checks, configured roots, approval rules, and command/file policy.
 
-
 ### `tool_catalog_categories`
 
 Returns compact category summaries and enabled/disabled counts. Use this first for progressive discovery.
@@ -99,7 +98,6 @@ Use these tools for Markdown files instead of reading or editing entire large do
 - `md_append_subsection` appends a child subsection under an existing section.
 
 All Markdown write tools respect file policy, optional `dry_run`, compact diffs, and atomic writes. Headings inside fenced code blocks are ignored.
-
 
 ### `fs_create_dir`
 
@@ -288,7 +286,6 @@ Notes:
 - Output and runtime are capped.
 - The default argv runner uses a stripped/server-controlled environment, not the user's interactive shell. This is safer and more reproducible, but it can miss pyenv/asdf/nvm/direnv, virtualenv activation, aliases, and shell PATH setup. Trusted project commands can opt into `run_mode = "persistent_shell"` when `[command_environment].allow_persistent_shell = true`.
 
-
 ### Background command jobs
 
 `cmd_start_named` starts a configured named command and returns immediately with a `job_id`. Jobs are owned by the server, not by the shell. The same named-command validation, trusted-project checks, output caps, timeout policy, and process-tree cleanup rules apply. Background jobs capture stdout/stderr while running through server-owned process execution; they do not use shell job control or occupy a persistent-shell session.
@@ -320,7 +317,7 @@ Use this prompt when starting a coding task:
 Use the personal MCP server tools only inside the configured roots. First call fs_list_roots, then inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file. For edits, use fs_apply_patch for scoped replacements or fs_apply_unified_patch when server_info.features.unified_patch is true; review returned diffs when useful and apply only the intended changes. After edits, use git_diff and an available named command such as just-ci, just-test, or go-test to verify. Do not read denied secret files or request paths outside the configured roots.
 ```
 
-## v0.2 dynamic command policy
+## Dynamic command policy
 
 `cmd_run_argv` runs an executable plus argv array after `command_policy` evaluation. It never uses a shell, so shell syntax such as pipes, redirects, glob expansion, `&&`, and shell-managed background jobs is not supported.
 
@@ -378,8 +375,6 @@ Reads one `personal-mcp://` resource by URI. Examples:
 {"uri": "personal-mcp://tree/personal-mcp-server"}
 ```
 
-
-<!-- v0.2.5 cwd note -->
 ## Per-call cwd
 
 Most path-based tools accept an optional `cwd` argument. `cwd` is resolved inside configured roots and is used only as the base for that tool call. The server never calls `os.Chdir` and does not maintain hidden session working-directory state. Use `cwd` when one configured root contains multiple projects, for example `{ "cwd": "personal-mcp-server", "path": "internal/fsx/tools.go" }`.
@@ -388,9 +383,7 @@ Most path-based tools accept an optional `cwd` argument. `cwd` is resolved insid
 
 Audit logs can be configured with `[audit].path` or overridden with `--audit-log`. If no audit path is configured, audit events are written to stderr.
 
-
 Note: `fs_apply_patch` treats `expected_replacements` as optional and defaults it to `1` when omitted. It caps how many exact matches are replaced and reports warnings when the found count differs; only zero matches remains a hard error.
-
 
 ## Large file guidance
 
@@ -398,14 +391,11 @@ For large files, first use `fs_get_file_info`, `fs_tail_file`, and `fs_search_te
 
 ## Go-native grep/find/sed-style tools
 
-personal-mcp-server keeps core filesystem operations in Go so the server works on
-machines without GNU grep/find/sed or git.
+personal-mcp-server keeps core filesystem operations in Go so the server works on machines without GNU grep/find/sed or git.
 
 ### fs_find
 
-Use `fs_find` to discover files and directories inside configured roots when `server_info.features.native_find` is true. It is
-bounded, root-aware, and supports `cwd`, type filters, glob filters, depth, size,
-and result caps. Prefer it over shell `find` when available. If `truncated=true`, repeat the same call with `offset` set to `next_offset`.
+Use `fs_find` to discover files and directories inside configured roots when `server_info.features.native_find` is true. It is bounded, root-aware, and supports `cwd`, type filters, glob filters, depth, size, and result caps. Prefer it over shell `find` when available. If `truncated=true`, repeat the same call with `offset` set to `next_offset`.
 
 Example:
 
@@ -423,8 +413,7 @@ Example:
 
 ### fs_search_text
 
-`fs_search_text` is the Go-native grep-like tool. It supports literal or regex
-search, include/exclude globs, context lines, result caps, and offset pagination.
+`fs_search_text` is the Go-native grep-like tool. It supports literal or regex search, include/exclude globs, context lines, result caps, and offset pagination.
 
 Example:
 
@@ -444,9 +433,7 @@ Example:
 
 ### fs_replace_regex
 
-`fs_replace_regex` is the Go-native sed-like replacement tool. It uses Go RE2
-regular expressions, never shells out, supports line ranges, defaults to one
-replacement, supports `dry_run`, and returns a compact diff.
+`fs_replace_regex` is the Go-native sed-like replacement tool. It uses Go RE2 regular expressions, never shells out, supports line ranges, defaults to one replacement, supports `dry_run`, and returns a compact diff.
 
 Example:
 
@@ -465,12 +452,7 @@ Example:
 
 ## Policy explanation tools
 
-Use `cmd_explain_policy` and `file_explain_policy` before attempting operations
-that might be denied or prompt for approval. They return the policy decision and
-matched rule without performing the operation. `file_explain_policy` includes the
-global decision, any trusted project decision, and the effective decision used by
-file tools.
-
+Use `cmd_explain_policy` and `file_explain_policy` before attempting operations that might be denied or prompt for approval. They return the policy decision and matched rule without performing the operation. `file_explain_policy` includes the global decision, any trusted project decision, and the effective decision used by file tools.
 
 ### cmd_list_named
 
@@ -600,7 +582,6 @@ Background jobs always run as server-owned `background_exec` processes even when
 
 Use `cmd_list_named` with `include_args=true` to inspect each command's `cwd`, `run_mode`, `shell`, `allow_extra_args`, and active `max_extra_args` metadata before calling `cmd_run_named`.
 
-
 ## Diagnostics and config inspection
 
 ### `diagnostics_recent_slow_tools`
@@ -626,8 +607,7 @@ Use these read-only tools to navigate structured data without dumping whole file
 - `json_search`: search keys and scalar values, returning pointers and previews; use `type_filter` and `pointer_prefix` to narrow large documents.
 - `json_validate`: validate JSON and report the root type.
 
-For JSONL logs, prefer `jsonl_info` first to discover fields, then use `jsonl_filter`, `jsonl_tail`, or `jsonl_read` for bounded records. `jsonl_filter` supports exact matches, contains, exists/missing, nested dotted fields, numeric ranges, and timestamp ranges. Malformed and empty lines are counted instead of crashing the workflow. JSON and JSONL tools remain read-only in v0.5.7.
-
+For JSONL logs, prefer `jsonl_info` first to discover fields, then use `jsonl_filter`, `jsonl_tail`, or `jsonl_read` for bounded records. `jsonl_filter` supports exact matches, contains, exists/missing, nested dotted fields, numeric ranges, and timestamp ranges. Malformed and empty lines are counted instead of crashing the workflow. JSON and JSONL tools are read-only.
 
 ## Local feedback
 
