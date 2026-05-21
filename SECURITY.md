@@ -2,11 +2,11 @@
 
 ## Supported versions
 
-This project is pre-1.0. Only the latest released tarball is considered supported.
+This project is pre-1.0. Only the latest released version is considered supported.
 
 ## Reporting a vulnerability
 
-Do not post secrets, exploit details, or private local paths in a public issue. Report privately to the project maintainer if this repository is published. Include:
+Do not post secrets, exploit details, private local paths, credentials, private documents, or sensitive logs in a public issue. Report privately to the project maintainer if this repository is published. Include:
 
 - affected version
 - operating system
@@ -16,7 +16,7 @@ Do not post secrets, exploit details, or private local paths in a public issue. 
 
 ## Intended safety boundary
 
-`personal-mcp-server` is a single-user localhost MCP server for controlled local coding workflows. It is not a remote multi-user service.
+`personal-mcp-server` is a trusted, single-user, localhost MCP server for local coding and structured-data workflows. It is not a hardened sandbox, a remote multi-user service, or a security boundary for untrusted users, untrusted models, untrusted prompts, hostile local processes, or internet-facing use.
 
 The intended hard boundaries are:
 
@@ -24,25 +24,35 @@ The intended hard boundaries are:
 - bearer-token authentication
 - Host and Origin validation
 - configured filesystem roots only
+- file policy and project policy
 - denied secret-looking files
-- bounded reads/searches/writes/output
-- no raw shell
-- named commands only
-- no PID/process-management tools
+- directory refusal for file-only tools
+- overwrite protection unless explicitly requested
+- bounded reads, searches, diffs, and command output
+- named commands and command-policy evaluation
+- no raw shell strings from tool callers
+- no direct PID/process-management tools
 - no network-fetch tools
+
+Filesystem mutation tools are intentionally low-friction for trusted single-user local workflows. They can write, patch, append, replace, delete, bulk-delete, move, and create files inside configured roots when enabled and allowed by policy. They do not require hash gates, expected-size gates, mandatory dry-run gates, or plan hashes.
 
 ## Known limitations
 
 - A user who configures a broad root, such as their home directory, expands the blast radius.
-- A named command can still do anything that command is designed to do inside the user account permissions.
+- A named command can still do anything that command is designed to do within the user account's permissions.
+- A command-policy allow rule can permit powerful local programs if configured too broadly.
 - Prompt guidance is not a security boundary. Enforcement must happen in code.
 - Localhost HTTP can be targeted by malicious websites, so auth plus Host/Origin checks remain required.
 - TOCTOU-style filesystem races are reduced but not fully eliminated.
+- Secret-name deny rules reduce accidental access to obvious secrets, but they are not a complete data-loss-prevention system.
 
 ## Safe-use recommendations
 
-- Use project-specific roots, not your whole home directory.
-- Prefer `auth_token_file` for GUI-launched clients.
-- Keep `fs_apply_patch`, `fs_create_file`, and `cmd_run_named` disabled until you need them.
+- Keep the server bound to `127.0.0.1` or `localhost`.
+- Keep bearer-token auth enabled; prefer `auth_token_file` for GUI-launched clients.
+- Use project-specific roots instead of your whole home directory.
+- Enable only the mutation and command tools you actually want.
 - Configure only commands you would run manually in that project.
-- Review audit logs when using write or command tools.
+- Use command-policy and file-policy defaults that match your risk tolerance.
+- Review audit logs when using write, delete, move, or command tools.
+- Do not include secrets, credentials, private documents, or sensitive logs in feedback or public issue reports.
