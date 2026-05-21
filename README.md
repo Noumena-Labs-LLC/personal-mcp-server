@@ -60,6 +60,12 @@ The most common first-run flow is:
 just install-user
 personal-mcp-server init --root ~/code/my-project --generate-token
 personal-mcp-server doctor --config ~/.personal-mcp-server/config/config.toml
+personal-mcp-server serve --config ~/.personal-mcp-server/config/config.toml
+```
+
+Then, from another terminal, check the running server:
+
+```sh
 personal-mcp-server client --config ~/.personal-mcp-server/config/config.toml ping
 ```
 
