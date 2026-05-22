@@ -45,6 +45,8 @@ type persistentShellPool struct {
 	starting int
 }
 
+var errPersistentShellBusy = errors.New("persistent shell busy")
+
 func NewRunner(c *config.Config, s *fsx.Sandbox, approver *approval.Manager, projects *project.Manager) *Runner {
 	specs := map[string]config.CommandSpec{}
 	for i := range c.Commands {
@@ -270,18 +272,10 @@ func (r *Runner) runPersistentShell(parentCtx context.Context, spec config.Comma
 	started := time.Now()
 	sess, err := r.checkoutPersistentSession(ctx, state.Root, shellPath, cwd, spec)
 	if err != nil {
-		if isPersistentShellBusy(err) && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
-			result := map[string]any{
-				"exit_code": -1, "timed_out": true, "duration_ms": time.Since(started).Milliseconds(), "configured_timeout_seconds": r.Cfg.Limits.CommandTimeoutSeconds,
-				"stdout": "", "stderr": "", "stdout_truncated": false, "stderr_truncated": false,
-				"timeout_phase": "persistent_shell_busy", "timeout_guidance": commandTimeoutGuidance(), "shell_pool_size": r.persistentShellPoolSize(),
-			}
-			for k, v := range extra {
-				result[k] = v
-			}
-			return result, nil
+		if isPersistentShellBusy(err) {
+			return r.persistentShellBusyResult(started, extra), nil
 		}
-		return nil, err
+		return r.persistentShellInitFailureResult(started, err, extra), nil
 	}
 	extra["shell"] = shellPath
 	extra["shell_session"] = sess.key
@@ -289,25 +283,25 @@ func (r *Runner) runPersistentShell(parentCtx context.Context, spec config.Comma
 	argv := append([]string{spec.Exec}, args...)
 	stdout, truncated, exitCode, runErr := sess.runLocked(ctx, cwd, argv, r.Cfg.Limits.MaxCommandOutputBytes)
 	timedOut := errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, context.Canceled)
-	busyTimedOut := isPersistentShellBusy(runErr) && timedOut
 	if shouldRetryPersistentShellRun(ctx, runErr, timedOut) {
 		r.dropPersistentSession(sess)
 		sess.kill()
 		sess.waitAfterKill()
 		sess, runErr = r.checkoutPersistentSession(ctx, state.Root, shellPath, cwd, spec)
-		if runErr == nil {
-			extra["shell_session"] = sess.key
-			stdout, truncated, exitCode, runErr = sess.runLocked(ctx, cwd, argv, r.Cfg.Limits.MaxCommandOutputBytes)
+		if isPersistentShellBusy(runErr) {
+			return r.persistentShellBusyResult(started, extra), nil
 		}
+		if runErr != nil {
+			return r.persistentShellInitFailureResult(started, runErr, extra), nil
+		}
+		extra["shell_session"] = sess.key
+		stdout, truncated, exitCode, runErr = sess.runLocked(ctx, cwd, argv, r.Cfg.Limits.MaxCommandOutputBytes)
 		timedOut = errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, context.Canceled)
-		busyTimedOut = isPersistentShellBusy(runErr) && timedOut
 	}
 	if runErr != nil {
-		if !busyTimedOut {
-			r.dropPersistentSession(sess)
-			sess.kill()
-			sess.waitAfterKill()
-		}
+		r.dropPersistentSession(sess)
+		sess.kill()
+		sess.waitAfterKill()
 		if !timedOut {
 			return nil, runErr
 		}
@@ -316,10 +310,7 @@ func (r *Runner) runPersistentShell(parentCtx context.Context, spec config.Comma
 		"exit_code": exitCode, "timed_out": timedOut, "duration_ms": time.Since(started).Milliseconds(), "configured_timeout_seconds": r.Cfg.Limits.CommandTimeoutSeconds,
 		"stdout": stripTerminalEscapes(stdout), "stderr": "", "stdout_truncated": truncated, "stderr_truncated": false,
 	}
-	if busyTimedOut {
-		result["timeout_phase"] = "persistent_shell_busy"
-		result["timeout_guidance"] = commandTimeoutGuidance()
-	} else if timedOut {
+	if timedOut {
 		result["timeout_phase"] = "command_run"
 		result["timeout_guidance"] = commandTimeoutGuidance()
 	}
@@ -327,6 +318,33 @@ func (r *Runner) runPersistentShell(parentCtx context.Context, spec config.Comma
 		result[k] = v
 	}
 	return result, nil
+}
+
+func (r *Runner) persistentShellBusyResult(started time.Time, extra map[string]any) map[string]any {
+	result := map[string]any{
+		"exit_code": -1, "ok": false, "busy": true, "retryable": true, "timed_out": false,
+		"duration_ms": time.Since(started).Milliseconds(), "configured_timeout_seconds": r.Cfg.Limits.CommandTimeoutSeconds,
+		"stdout": "", "stderr": "", "stdout_truncated": false, "stderr_truncated": false,
+		"busy_phase": "persistent_shell_checkout", "message": "persistent shell pool is busy; retry the command later", "shell_pool_size": r.persistentShellPoolSize(),
+	}
+	for k, v := range extra {
+		result[k] = v
+	}
+	return result
+}
+
+func (r *Runner) persistentShellInitFailureResult(started time.Time, err error, extra map[string]any) map[string]any {
+	result := map[string]any{
+		"exit_code": -1, "ok": false, "busy": false, "retryable": true,
+		"timed_out": errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled),
+		"duration_ms": time.Since(started).Milliseconds(), "configured_timeout_seconds": r.Cfg.Limits.CommandTimeoutSeconds,
+		"stdout": "", "stderr": "", "stdout_truncated": false, "stderr_truncated": false,
+		"failure_phase": "persistent_shell_init", "error": err.Error(), "shell_pool_size": r.persistentShellPoolSize(),
+	}
+	for k, v := range extra {
+		result[k] = v
+	}
+	return result
 }
 
 func isPersistentShellBusy(runErr error) bool {
@@ -362,13 +380,6 @@ func (r *Runner) persistentShellPoolSize() int {
 	return 2
 }
 
-func (r *Runner) persistentShellAcquireTimeout() time.Duration {
-	if r.Cfg != nil && r.Cfg.CommandEnvironment.PersistentShellAcquireTimeoutSeconds > 0 {
-		return time.Duration(r.Cfg.CommandEnvironment.PersistentShellAcquireTimeoutSeconds) * time.Second
-	}
-	return 6 * time.Second
-}
-
 func (r *Runner) persistentSession(ctx context.Context, root, shellPath, cwd string, spec config.CommandSpec) (*persistentShell, error) {
 	sess, err := r.checkoutPersistentSession(ctx, root, shellPath, cwd, spec)
 	if err != nil {
@@ -395,50 +406,42 @@ func (r *Runner) persistentPool(key string) *persistentShellPool {
 func (r *Runner) checkoutPersistentSession(ctx context.Context, root, shellPath, cwd string, spec config.CommandSpec) (*persistentShell, error) {
 	key := root + "\x00" + shellPath
 	pool := r.persistentPool(key)
-	waitCtx, cancel := context.WithTimeout(ctx, r.persistentShellAcquireTimeout())
-	defer cancel()
 
-	for {
-		create := false
-		pool.mu.Lock()
-		for _, sess := range pool.sessions {
-			if sess.tryLockRun() {
-				pool.mu.Unlock()
-				return sess, nil
-			}
-		}
-		if len(pool.sessions)+pool.starting < r.persistentShellPoolSize() {
-			pool.starting++
-			create = true
-		}
-		pool.mu.Unlock()
-
-		if create {
-			sess, err := newPersistentShell(ctx, key, shellPath, cwd, spec)
-			pool.mu.Lock()
-			pool.starting--
-			if err == nil {
-				pool.sessions = append(pool.sessions, sess)
-			}
+	pool.mu.Lock()
+	for _, sess := range pool.sessions {
+		if sess.tryLockRun() {
 			pool.mu.Unlock()
-			if err != nil {
-				return nil, err
-			}
-			if err := sess.lockRun(ctx); err != nil {
-				r.dropPersistentSession(sess)
-				sess.kill()
-				sess.waitAfterKill()
-				return nil, persistentShellBusyError{err: err}
-			}
 			return sess, nil
 		}
+	}
+	if len(pool.sessions)+pool.starting >= r.persistentShellPoolSize() {
+		pool.mu.Unlock()
+		return nil, persistentShellBusyError{err: errPersistentShellBusy}
+	}
+	pool.starting++
+	pool.mu.Unlock()
 
-		select {
-		case <-waitCtx.Done():
-			return nil, persistentShellBusyError{err: waitCtx.Err()}
-		case <-time.After(50 * time.Millisecond):
+	sess, err := newPersistentShell(ctx, key, shellPath, cwd, spec)
+	if err == nil {
+		// Claim the newly-created shell before publishing it into the pool so no
+		// concurrent foreground command can steal the session from its creator.
+		if lockErr := sess.lockRun(ctx); lockErr != nil {
+			sess.kill()
+			sess.waitAfterKill()
+			err = persistentShellBusyError{err: lockErr}
 		}
 	}
+
+	pool.mu.Lock()
+	pool.starting--
+	if err == nil {
+		pool.sessions = append(pool.sessions, sess)
+	}
+	pool.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return sess, nil
 }
 
 func (r *Runner) dropPersistentSession(sess *persistentShell) {
