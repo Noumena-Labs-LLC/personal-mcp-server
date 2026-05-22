@@ -124,7 +124,10 @@ func (a *Logger) Close() error {
 		<-a.done
 	}
 	if v := a.closeErr.Load(); v != nil {
-		return v.(error)
+		if err, ok := v.(error); ok {
+			return err
+		}
+		return fmt.Errorf("unexpected stored audit close error type %T", v)
 	}
 	return nil
 }
