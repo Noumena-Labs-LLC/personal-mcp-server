@@ -7,13 +7,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 )
 
 type Logger struct {
-	mu         sync.Mutex
 	l          *log.Logger
 	file       *os.File
 	path       string
@@ -21,14 +19,16 @@ type Logger struct {
 	maxBackups int
 	sizeBytes  int64
 	queue      chan []byte
+	closeCh    chan struct{}
 	done       chan struct{}
-	closed     bool
+	closed     atomic.Bool
 	dropped    atomic.Uint64
+	closeErr   atomic.Value
 }
 
 func New(path string, maxBytes int64, maxBackups int) (*Logger, error) {
 	if path == "" {
-		logger := &Logger{l: log.New(os.Stderr, "audit ", 0), queue: make(chan []byte, 1024), done: make(chan struct{})}
+		logger := &Logger{l: log.New(os.Stderr, "audit ", 0), queue: make(chan []byte, 1024), closeCh: make(chan struct{}), done: make(chan struct{})}
 		go logger.writeLoop()
 		return logger, nil
 	}
@@ -49,20 +49,38 @@ func New(path string, maxBytes int64, maxBackups int) (*Logger, error) {
 	if info, statErr := f.Stat(); statErr == nil {
 		sizeBytes = info.Size()
 	}
-	logger := &Logger{l: log.New(f, "", 0), file: f, path: path, maxBytes: maxBytes, maxBackups: maxBackups, sizeBytes: sizeBytes, queue: make(chan []byte, 1024), done: make(chan struct{})}
+	logger := &Logger{l: log.New(f, "", 0), file: f, path: path, maxBytes: maxBytes, maxBackups: maxBackups, sizeBytes: sizeBytes, queue: make(chan []byte, 1024), closeCh: make(chan struct{}), done: make(chan struct{})}
 	go logger.writeLoop()
 	return logger, nil
 }
 
 func (a *Logger) writeLoop() {
 	defer close(a.done)
-	for b := range a.queue {
-		a.writeEventBytes(b)
+	for {
+		select {
+		case b := <-a.queue:
+			a.writeEventBytes(b)
+		case <-a.closeCh:
+			a.drainQueue()
+			a.closeFile()
+			return
+		}
+	}
+}
+
+func (a *Logger) drainQueue() {
+	for {
+		select {
+		case b := <-a.queue:
+			a.writeEventBytes(b)
+		default:
+			return
+		}
 	}
 }
 
 func (a *Logger) Event(tool string, fields map[string]any) {
-	if a == nil || a.l == nil {
+	if a == nil || a.closed.Load() {
 		return
 	}
 	if fields == nil {
@@ -71,9 +89,7 @@ func (a *Logger) Event(tool string, fields map[string]any) {
 	fields["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
 	fields["tool"] = tool
 	b, _ := json.Marshal(fields)
-	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
+	if a.closed.Load() {
 		return
 	}
 	select {
@@ -81,7 +97,6 @@ func (a *Logger) Event(tool string, fields map[string]any) {
 	default:
 		a.dropped.Add(1)
 	}
-	a.mu.Unlock()
 }
 
 func (a *Logger) Dropped() uint64 {
@@ -92,8 +107,6 @@ func (a *Logger) Dropped() uint64 {
 }
 
 func (a *Logger) writeEventBytes(b []byte) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	incoming := int64(len(b) + 1)
 	_ = a.rotateIfNeeded(incoming)
 	a.l.Println(string(b))
@@ -104,29 +117,27 @@ func (a *Logger) Close() error {
 	if a == nil {
 		return nil
 	}
-	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
-		return nil
+	if a.closed.CompareAndSwap(false, true) {
+		close(a.closeCh)
 	}
-	a.closed = true
-	if a.queue != nil {
-		close(a.queue)
+	if a.done != nil {
+		<-a.done
 	}
-	done := a.done
-	a.mu.Unlock()
-	if done != nil {
-		<-done
+	if v := a.closeErr.Load(); v != nil {
+		return v.(error)
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	return nil
+}
+
+func (a *Logger) closeFile() {
 	if a.file == nil {
-		return nil
+		return
 	}
-	err := a.file.Close()
+	if err := a.file.Close(); err != nil {
+		a.closeErr.Store(err)
+	}
 	a.file = nil
 	a.l.SetOutput(io.Discard)
-	return err
 }
 
 func (a *Logger) rotateIfNeeded(incoming int64) error {
