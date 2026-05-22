@@ -130,7 +130,7 @@ func (c *approvalClient) watch(interval time.Duration) error {
 }
 
 func (c *approvalClient) decide(id, decision string) error {
-	body, err := c.do(http.MethodPost, "/approvals/" + url.PathEscape(id) + "/" + decision)
+	body, err := c.do(http.MethodPost, "/approvals/"+url.PathEscape(id)+"/"+decision)
 	if err != nil {
 		return err
 	}
