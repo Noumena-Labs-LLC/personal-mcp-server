@@ -121,6 +121,8 @@ type ReadFileArgs struct {
 	WholeFile bool   `json:"whole_file"`
 }
 
+const highOffsetReadLineThreshold = 5000
+
 func (t *Tools) ReadFile(raw json.RawMessage) (any, error) {
 	var a ReadFileArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -159,11 +161,35 @@ func (t *Tools) ReadFile(raw json.RawMessage) (any, error) {
 			"suggested_tools": largeFileSuggestedTools(),
 		}, nil
 	}
+	if highOffsetReadWouldScanTooMuch(info.Size(), t.Cfg.Limits.MaxReadBytes, a.StartLine, a.WholeFile) {
+		return map[string]any{
+			"ok":              false,
+			"error":           "high_start_line_requires_linear_scan",
+			"path":            displayPath,
+			"cwd":             a.Cwd,
+			"start_line":      a.StartLine,
+			"max_lines":       a.MaxLines,
+			"size_bytes":      info.Size(),
+			"max_read_bytes":  t.Cfg.Limits.MaxReadBytes,
+			"line_threshold":  highOffsetReadLineThreshold,
+			"message":         "fs_read_file reaches start_line by scanning from the beginning; use fs_tail_file for recent content or fs_search_text to find nearby line ranges before retrying a bounded read.",
+			"suggested_tools": []string{"fs_tail_file", "fs_search_text", "fs_get_file_info"},
+			"whole_file":      a.WholeFile,
+			"truncated":       true,
+		}, nil
+	}
 	content, endLine, truncated, bytesRead, err := readTextWindow(p, a.StartLine, a.MaxLines, t.Cfg.Limits.MaxReadBytes)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"content": content, "path": displayPath, "cwd": a.Cwd, "start_line": a.StartLine, "end_line": endLine, "truncated": truncated, "whole_file": a.WholeFile, "bytes_read": bytesRead}, nil
+}
+
+func highOffsetReadWouldScanTooMuch(size, maxReadBytes int64, startLine int, wholeFile bool) bool {
+	if wholeFile || startLine <= highOffsetReadLineThreshold || size <= 0 || maxReadBytes <= 0 {
+		return false
+	}
+	return size > maxReadBytes
 }
 
 type TailFileArgs struct {
