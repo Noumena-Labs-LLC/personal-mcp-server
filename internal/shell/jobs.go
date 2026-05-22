@@ -37,6 +37,10 @@ type commandJob struct {
 	Stderr          *jobOutputStream
 	CancelRequested bool
 	cancel          context.CancelFunc
+
+	// Active is owned by Runner.jobMu. It is true from successful registration
+	// until finishCommandJob marks the job complete.
+	Active bool
 }
 
 type StartNamedResult struct {
@@ -104,6 +108,7 @@ func (r *Runner) StartNamed(raw json.RawMessage) (any, error) {
 		job.closeOutputStreams()
 		return backgroundJobsBusyResult(prepared.Args.Name, prepared.Cwd, active, maxJobs), nil
 	}
+	job.Active = true
 	r.jobs[jobID] = job
 	r.jobMu.Unlock()
 
@@ -133,13 +138,7 @@ func backgroundJobsBusyResult(name, cwd string, active, maxJobs int) map[string]
 func (r *Runner) activeBackgroundJobsLocked() int {
 	active := 0
 	for _, job := range r.jobs {
-		if job == nil {
-			continue
-		}
-		job.mu.Lock()
-		finished := !job.Finished.IsZero()
-		job.mu.Unlock()
-		if !finished {
+		if job != nil && job.Active {
 			active++
 		}
 	}
@@ -261,6 +260,12 @@ func (r *Runner) finishCommandJob(job *commandJob, status, errText string, resul
 	job.Status = status
 	job.Err = errText
 	job.mu.Unlock()
+
+	r.jobMu.Lock()
+	if job.Active {
+		job.Active = false
+	}
+	r.jobMu.Unlock()
 }
 
 type jobOutputWriter struct {
