@@ -163,20 +163,21 @@ func (s *jobOutputStream) publish(ring *outputLineRing, partial []byte, partialS
 	s.snapshot.Store(snap)
 }
 
-func appendLimitedBytes(dst, src []byte, max int, alreadyShort bool) ([]byte, bool) {
-	if max <= 0 {
+func appendLimitedBytes(dst, src []byte, limit int, alreadyShort bool) ([]byte, bool) {
+	if limit <= 0 {
 		return dst[:0], alreadyShort || len(src) > 0
 	}
-	if len(src) >= max {
-		out := append(dst[:0], src[len(src)-max:]...)
-		return out, true
+	if len(src) >= limit {
+		dst = dst[:0]
+		dst = append(dst, src[len(src)-limit:]...)
+		return dst, true
 	}
 	dst = append(dst, src...)
-	if len(dst) <= max {
+	if len(dst) <= limit {
 		return dst, alreadyShort
 	}
-	copy(dst, dst[len(dst)-max:])
-	return dst[:max], true
+	copy(dst, dst[len(dst)-limit:])
+	return dst[:limit], true
 }
 
 func indexByte(b []byte, c byte) int {
@@ -262,8 +263,7 @@ func tailOutputSnapshot(snap outputSnapshot, tailLines, maxTailBytes int, droppe
 	}
 }
 
-func linesToLimitedText(lines []outputLine, maxBytes int) (string, bool, bool) {
-	lineShort := false
+func linesToLimitedText(lines []outputLine, maxBytes int) (text string, lineShort bool, tailShort bool) {
 	for _, line := range lines {
 		if line.ShortRead {
 			lineShort = true
@@ -278,7 +278,6 @@ func linesToLimitedText(lines []outputLine, maxBytes int) (string, bool, bool) {
 	}
 	kept := make([]string, 0, len(lines))
 	used := 0
-	tailShort := false
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := lines[i].Text
 		lineBytes := len(line)
