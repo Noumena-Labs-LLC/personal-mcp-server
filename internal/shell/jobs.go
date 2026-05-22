@@ -20,6 +20,7 @@ const (
 	defaultJobOutputLines     = 2000
 	defaultJobOutputTailLines = 200
 	jobOutputChannelSize      = 64
+	defaultMaxBackgroundJobs  = 16
 )
 
 type commandJob struct {
@@ -36,6 +37,10 @@ type commandJob struct {
 	Stderr          *jobOutputStream
 	CancelRequested bool
 	cancel          context.CancelFunc
+
+	// Active is owned by Runner.jobMu. It is true from successful registration
+	// until finishCommandJob marks the job complete.
+	Active bool
 }
 
 type StartNamedResult struct {
@@ -95,12 +100,49 @@ func (r *Runner) StartNamed(raw json.RawMessage) (any, error) {
 	if r.jobs == nil {
 		r.jobs = map[string]*commandJob{}
 	}
+	active := r.activeBackgroundJobsLocked()
+	maxJobs := r.maxBackgroundJobs()
+	if maxJobs > 0 && active >= maxJobs {
+		r.jobMu.Unlock()
+		cancel()
+		job.closeOutputStreams()
+		return backgroundJobsBusyResult(prepared.Args.Name, prepared.Cwd, active, maxJobs), nil
+	}
+	job.Active = true
 	r.jobs[jobID] = job
 	r.jobMu.Unlock()
 
 	go r.runCommandJob(ctx, job, prepared.Spec, prepared.Cwd, prepared.FinalArgs)
 
 	return StartNamedResult{JobID: job.ID, Name: job.Name, Cwd: job.Cwd, Status: job.Status, StartedAt: job.Started.Format(time.RFC3339)}, nil
+}
+
+func (r *Runner) maxBackgroundJobs() int {
+	return defaultMaxBackgroundJobs
+}
+
+func backgroundJobsBusyResult(name, cwd string, active, maxJobs int) map[string]any {
+	return map[string]any{
+		"ok":                  false,
+		"busy":                true,
+		"retryable":           true,
+		"error":               "too_many_background_jobs",
+		"message":             "too many background jobs are active; wait for one to finish or cancel an existing job",
+		"name":                name,
+		"cwd":                 cwd,
+		"active_jobs":         active,
+		"max_background_jobs": maxJobs,
+	}
+}
+
+func (r *Runner) activeBackgroundJobsLocked() int {
+	active := 0
+	for _, job := range r.jobs {
+		if job != nil && job.Active {
+			active++
+		}
+	}
+	return active
 }
 
 func (r *Runner) jobOutputLimits() jobOutputLimits {
@@ -218,6 +260,12 @@ func (r *Runner) finishCommandJob(job *commandJob, status, errText string, resul
 	job.Status = status
 	job.Err = errText
 	job.mu.Unlock()
+
+	r.jobMu.Lock()
+	if job.Active {
+		job.Active = false
+	}
+	r.jobMu.Unlock()
 }
 
 type jobOutputWriter struct {
@@ -332,15 +380,34 @@ func parseJobID(raw json.RawMessage) (string, error) {
 
 func (r *Runner) pruneFinishedJobs(now time.Time) {
 	r.jobMu.Lock()
-	defer r.jobMu.Unlock()
+	jobs := make(map[string]*commandJob, len(r.jobs))
 	for id, job := range r.jobs {
+		jobs[id] = job
+	}
+	r.jobMu.Unlock()
+
+	expired := make(map[string]*commandJob)
+	for id, job := range jobs {
+		if job == nil {
+			continue
+		}
 		job.mu.Lock()
-		expired := !job.Finished.IsZero() && now.Sub(job.Finished) > finishedJobRetention
+		jobExpired := !job.Finished.IsZero() && now.Sub(job.Finished) > finishedJobRetention
 		job.mu.Unlock()
-		if expired {
+		if jobExpired {
+			expired[id] = job
+		}
+	}
+	if len(expired) == 0 {
+		return
+	}
+	r.jobMu.Lock()
+	for id, job := range expired {
+		if r.jobs[id] == job {
 			delete(r.jobs, id)
 		}
 	}
+	r.jobMu.Unlock()
 }
 
 func (j *commandJob) snapshot(includeOutput bool, tailLines int) map[string]any {
