@@ -20,6 +20,8 @@ type outputLine struct {
 
 type outputSnapshot struct {
 	Lines          []outputLine
+	Partial        outputLine
+	HasPartial     bool
 	LinesTruncated bool
 	LineShortRead  bool
 }
@@ -124,12 +126,12 @@ func (s *jobOutputStream) run() {
 				partial = partial[:0]
 				partialShort = false
 			}
-			s.publish(ring)
+			s.publish(ring, partial, partialShort)
 			close(msg.closeDone)
 			return
 		}
 		partial, partialShort = s.processChunk(ring, partial, partialShort, msg.data)
-		s.publish(ring)
+		s.publish(ring, partial, partialShort)
 	}
 }
 
@@ -149,8 +151,16 @@ func (s *jobOutputStream) processChunk(ring *outputLineRing, partial []byte, par
 	return partial, partialShort
 }
 
-func (s *jobOutputStream) publish(ring *outputLineRing) {
-	s.snapshot.Store(ring.snapshot())
+func (s *jobOutputStream) publish(ring *outputLineRing, partial []byte, partialShort bool) {
+	snap := ring.snapshot()
+	if len(partial) > 0 || partialShort {
+		snap.Partial = outputLine{Text: string(partial), ShortRead: partialShort}
+		snap.HasPartial = true
+		if partialShort {
+			snap.LineShortRead = true
+		}
+	}
+	s.snapshot.Store(snap)
 }
 
 func appendLimitedBytes(dst, src []byte, max int, alreadyShort bool) ([]byte, bool) {
@@ -179,11 +189,11 @@ func indexByte(b []byte, c byte) int {
 }
 
 type outputLineRing struct {
-	lines          []outputLine
-	next           int
-	count          int
-	truncated      bool
-	lineShortRead  bool
+	lines         []outputLine
+	next          int
+	count         int
+	truncated     bool
+	lineShortRead bool
 }
 
 func newOutputLineRing(maxLines int) *outputLineRing {
@@ -231,11 +241,15 @@ func tailOutputSnapshot(snap outputSnapshot, tailLines, maxTailBytes int, droppe
 	if tailLines <= 0 {
 		tailLines = defaultJobOutputTailLines
 	}
-	start := 0
-	if len(snap.Lines) > tailLines {
-		start = len(snap.Lines) - tailLines
+	lines := append([]outputLine(nil), snap.Lines...)
+	if snap.HasPartial {
+		lines = append(lines, snap.Partial)
 	}
-	selected := append([]outputLine(nil), snap.Lines[start:]...)
+	start := 0
+	if len(lines) > tailLines {
+		start = len(lines) - tailLines
+	}
+	selected := append([]outputLine(nil), lines[start:]...)
 	text, lineShort, tailShort := linesToLimitedText(selected, maxTailBytes)
 	return outputTailResult{
 		Text:           text,
@@ -244,7 +258,7 @@ func tailOutputSnapshot(snap outputSnapshot, tailLines, maxTailBytes int, droppe
 		LineShortRead:  snap.LineShortRead || lineShort,
 		TailShortRead:  tailShort,
 		DroppedChunks:  dropped,
-		Available:      len(snap.Lines) > 0,
+		Available:      len(lines) > 0,
 	}
 }
 
