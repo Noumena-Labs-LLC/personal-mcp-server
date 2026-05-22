@@ -19,7 +19,13 @@ jobs:
           cache: true
 
       - name: Check formatting
-        run: test -z "$(gofmt -l ./cmd ./internal)"
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt is required for these files:"
+            echo "$unformatted"
+            exit 1
+          fi
 
       - name: Vet
         run: go vet ./...
