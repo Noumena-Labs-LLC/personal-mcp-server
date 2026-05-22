@@ -131,8 +131,8 @@ func (l *liveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if state.acquire() {
-			defer state.release()
 			state.handler.ServeHTTP(w, r)
+			state.release()
 			return
 		}
 	}
