@@ -77,50 +77,66 @@ func (s *Server) Register(t Tool) { //nolint:nilerr // MCP tool errors are retur
 		if req != nil && req.Params != nil && len(req.Params.Arguments) > 0 {
 			args = req.Params.Arguments
 		}
+
+		handlerStarted := time.Now()
 		out, err := t.Handler(args)
-		fields := map[string]any{"ok": err == nil}
+		handlerDuration := time.Since(handlerStarted)
+
+		fields := map[string]any{
+			"ok":         err == nil,
+			"handler_ms": handlerDuration.Milliseconds(),
+		}
 		if err != nil {
 			fields["error"] = err.Error()
-		}
-		if err != nil {
 			duration := time.Since(started)
 			fields["duration_ms"] = duration.Milliseconds()
+			auditStarted := time.Now()
 			s.Audit.Event(t.Name, fields)
-			s.logToolLatency(t.Name, duration, err, len(args), len(err.Error()))
+			fields["audit_ms"] = time.Since(auditStarted).Milliseconds()
+			s.logToolLatency(t.Name, duration, err, len(args), len(err.Error()), fields)
 			return callToolError(err.Error()), nil //nolint:nilerr // MCP tool failures are encoded in CallToolResult.IsError.
 		}
+
+		marshalStarted := time.Now()
 		b, marshalErr := json.MarshalIndent(out, "", "  ")
+		marshalDuration := time.Since(marshalStarted)
 		duration := time.Since(started)
+		fields["marshal_ms"] = marshalDuration.Milliseconds()
 		fields["duration_ms"] = duration.Milliseconds()
 		if marshalErr != nil {
 			fields["ok"] = false
 			fields["error"] = marshalErr.Error()
+			auditStarted := time.Now()
 			s.Audit.Event(t.Name, fields)
-			s.logToolLatency(t.Name, duration, marshalErr, len(args), len(marshalErr.Error()))
+			fields["audit_ms"] = time.Since(auditStarted).Milliseconds()
+			s.logToolLatency(t.Name, duration, marshalErr, len(args), len(marshalErr.Error()), fields)
 			return callToolError(marshalErr.Error()), nil //nolint:nilerr // MCP tool failures are encoded in CallToolResult.IsError.
 		}
+
+		auditStarted := time.Now()
 		s.Audit.Event(t.Name, fields)
-		s.logToolLatency(t.Name, duration, nil, len(args), len(b))
+		fields["audit_ms"] = time.Since(auditStarted).Milliseconds()
+		s.logToolLatency(t.Name, duration, nil, len(args), len(b), fields)
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
 	})
 }
 
-func (s *Server) logToolLatency(toolName string, duration time.Duration, err error, requestBytes, responseBytes int) {
+func (s *Server) logToolLatency(toolName string, duration time.Duration, err error, requestBytes, responseBytes int, fields map[string]any) {
 	if s == nil || s.Cfg == nil {
 		return
 	}
 	slow := time.Duration(s.Cfg.ServerLogging.ToolSlowMS) * time.Millisecond
 	verySlow := time.Duration(s.Cfg.ServerLogging.ToolVerySlowMS) * time.Millisecond
 	if verySlow > 0 && duration >= verySlow {
-		s.logSlowToolCall(slog.LevelError, "tool_call_very_slow", toolName, duration, verySlow, err, requestBytes, responseBytes)
+		s.logSlowToolCall(slog.LevelError, "tool_call_very_slow", toolName, duration, verySlow, err, requestBytes, responseBytes, fields)
 		return
 	}
 	if slow > 0 && duration >= slow {
-		s.logSlowToolCall(slog.LevelWarn, "tool_call_slow", toolName, duration, slow, err, requestBytes, responseBytes)
+		s.logSlowToolCall(slog.LevelWarn, "tool_call_slow", toolName, duration, slow, err, requestBytes, responseBytes, fields)
 	}
 }
 
-func (s *Server) logSlowToolCall(level slog.Level, event, toolName string, duration, threshold time.Duration, err error, requestBytes, responseBytes int) {
+func (s *Server) logSlowToolCall(level slog.Level, event, toolName string, duration, threshold time.Duration, err error, requestBytes, responseBytes int, fields map[string]any) {
 	attrs := []slog.Attr{
 		slog.String("event", event),
 		slog.String("tool", toolName),
@@ -129,6 +145,13 @@ func (s *Server) logSlowToolCall(level slog.Level, event, toolName string, durat
 		slog.Bool("ok", err == nil),
 		slog.Int("request_bytes", requestBytes),
 		slog.Int("response_bytes", responseBytes),
+	}
+	for _, key := range []string{"handler_ms", "marshal_ms", "audit_ms"} {
+		if value, ok := fields[key]; ok {
+			if n, ok := value.(int64); ok {
+				attrs = append(attrs, slog.Int64(key, n))
+			}
+		}
 	}
 	if err != nil {
 		attrs = append(attrs, slog.String("error", err.Error()))
