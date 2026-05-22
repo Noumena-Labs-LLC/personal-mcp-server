@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 )
 
 func flagSet(name string) *flag.FlagSet {
