@@ -23,7 +23,7 @@ func serviceCommand(args []string) {
 		return
 	}
 	if len(args) > 1 && isHelpArg(args[1]) {
-		if !printCommandHelp("service "+args[0]) {
+		if !printCommandHelp("service " + args[0]) {
 			printCommandHelp("service")
 		}
 		return
@@ -352,7 +352,7 @@ func systemdManifestQuote(s string) string {
 	if !strings.ContainsAny(s, " \t\n\"'\\") {
 		return s
 	}
-	return `"` + strings.NewReplacer(`\\`, `\\\\`, `"`, `\\"`, "\n", `\n`, "\t", `\t`).Replace(s) + `"`
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\t", `\t`).Replace(s) + `"`
 }
 
 func serviceStatus(binary, configPath string) error {
