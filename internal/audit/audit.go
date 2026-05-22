@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,7 +23,7 @@ type Logger struct {
 	queue      chan []byte
 	done       chan struct{}
 	closed     bool
-	dropped    uint64
+	dropped    atomic.Uint64
 }
 
 func New(path string, maxBytes int64, maxBackups int) (*Logger, error) {
@@ -78,9 +79,16 @@ func (a *Logger) Event(tool string, fields map[string]any) {
 	select {
 	case a.queue <- b:
 	default:
-		a.dropped++
+		a.dropped.Add(1)
 	}
 	a.mu.Unlock()
+}
+
+func (a *Logger) Dropped() uint64 {
+	if a == nil {
+		return 0
+	}
+	return a.dropped.Load()
 }
 
 func (a *Logger) writeEventBytes(b []byte) {
