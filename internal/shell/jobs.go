@@ -15,7 +15,12 @@ import (
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
 )
 
-const finishedJobRetention = time.Hour
+const (
+	finishedJobRetention      = time.Hour
+	defaultJobOutputLines     = 2000
+	defaultJobOutputTailLines = 200
+	jobOutputChannelSize      = 64
+)
 
 type commandJob struct {
 	mu              sync.Mutex
@@ -27,8 +32,8 @@ type commandJob struct {
 	Status          string
 	Result          map[string]any
 	Err             string
-	Stdout          limitBuffer
-	Stderr          limitBuffer
+	Stdout          *jobOutputStream
+	Stderr          *jobOutputStream
 	CancelRequested bool
 	cancel          context.CancelFunc
 }
@@ -47,7 +52,7 @@ type JobArgs struct {
 
 type JobReadArgs struct {
 	JobID     string `json:"job_id"`
-	TailBytes int    `json:"tail_bytes"`
+	TailLines int    `json:"tail_lines"`
 }
 
 type JobListArgs struct {
@@ -63,6 +68,7 @@ func (r *Runner) StartNamed(raw json.RawMessage) (any, error) {
 	r.pruneFinishedJobs(time.Now())
 	jobID := "job_" + randomHex(12)
 	ctx, cancel := context.WithCancel(context.Background())
+	limits := r.jobOutputLimits()
 	job := &commandJob{
 		ID:      jobID,
 		Name:    prepared.Args.Name,
@@ -70,10 +76,10 @@ func (r *Runner) StartNamed(raw json.RawMessage) (any, error) {
 		Started: time.Now().UTC(),
 		Status:  "running",
 		Result:  map[string]any{},
+		Stdout:  newJobOutputStream(limits),
+		Stderr:  newJobOutputStream(limits),
 		cancel:  cancel,
 	}
-	job.Stdout.Limit = r.Cfg.Limits.MaxCommandOutputBytes
-	job.Stderr.Limit = r.Cfg.Limits.MaxCommandOutputBytes
 	for k, v := range prepared.Extra {
 		job.Result[k] = v
 	}
@@ -97,19 +103,33 @@ func (r *Runner) StartNamed(raw json.RawMessage) (any, error) {
 	return StartNamedResult{JobID: job.ID, Name: job.Name, Cwd: job.Cwd, Status: job.Status, StartedAt: job.Started.Format(time.RFC3339)}, nil
 }
 
+func (r *Runner) jobOutputLimits() jobOutputLimits {
+	maxBytes := int(r.Cfg.Limits.MaxCommandOutputBytes)
+	if maxBytes <= 0 {
+		maxBytes = 65536
+	}
+	return jobOutputLimits{
+		MaxLines:     defaultJobOutputLines,
+		MaxLineBytes: maxBytes,
+		MaxTailBytes: maxBytes,
+		ChannelSize:  jobOutputChannelSize,
+	}
+}
+
 func (r *Runner) runCommandJob(parentCtx context.Context, job *commandJob, spec config.CommandSpec, cwd string, args []string) {
 	ctx, cancel := context.WithTimeout(parentCtx, time.Duration(r.Cfg.Limits.CommandTimeoutSeconds)*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, spec.Exec, args...)
 	cmd.Dir = cwd
 	cmd.Env = buildEnvFromParts(spec.Env, spec.EnvFromHost)
-	cmd.Stdout = jobOutputWriter{runner: r, job: job, stream: "stdout"}
-	cmd.Stderr = jobOutputWriter{runner: r, job: job, stream: "stderr"}
+	cmd.Stdout = jobOutputWriter{stream: job.Stdout}
+	cmd.Stderr = jobOutputWriter{stream: job.Stderr}
 	setProcessGroup(cmd)
 
 	started := time.Now()
 	startErr := cmd.Start()
 	if startErr != nil {
+		job.closeOutputStreams()
 		r.finishCommandJob(job, "failed", startErr.Error(), map[string]any{"exit_code": -1, "timed_out": false, "duration_ms": time.Since(started).Milliseconds()})
 		return
 	}
@@ -124,6 +144,7 @@ func (r *Runner) runCommandJob(parentCtx context.Context, job *commandJob, spec 
 		killProcessTree(cmd)
 		waitErr = <-done
 	}
+	job.closeOutputStreams()
 
 	wasCancelled := false
 	job.mu.Lock()
@@ -164,6 +185,15 @@ func (r *Runner) runCommandJob(parentCtx context.Context, job *commandJob, spec 
 	r.finishCommandJob(job, status, errText, map[string]any{"exit_code": exitCode, "timed_out": timedOut, "duration_ms": time.Since(started).Milliseconds()})
 }
 
+func (j *commandJob) closeOutputStreams() {
+	if j.Stdout != nil {
+		j.Stdout.CloseAndFlush()
+	}
+	if j.Stderr != nil {
+		j.Stderr.CloseAndFlush()
+	}
+}
+
 func setProcessGroup(cmd *exec.Cmd) {
 	if runtime.GOOS != "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -184,10 +214,6 @@ func (r *Runner) finishCommandJob(job *commandJob, status, errText string, resul
 	for k, v := range result {
 		job.Result[k] = v
 	}
-	job.Result["stdout"] = job.Stdout.String()
-	job.Result["stderr"] = job.Stderr.String()
-	job.Result["stdout_truncated"] = job.Stdout.Truncated
-	job.Result["stderr_truncated"] = job.Stderr.Truncated
 	job.Finished = now
 	job.Status = status
 	job.Err = errText
@@ -195,24 +221,14 @@ func (r *Runner) finishCommandJob(job *commandJob, status, errText string, resul
 }
 
 type jobOutputWriter struct {
-	runner *Runner
-	job    *commandJob
-	stream string
+	stream *jobOutputStream
 }
 
 func (w jobOutputWriter) Write(p []byte) (int, error) {
-	w.job.mu.Lock()
-	defer w.job.mu.Unlock()
-	if w.stream == "stderr" {
-		if w.job.Stderr.Limit == 0 {
-			w.job.Stderr.Limit = w.runner.Cfg.Limits.MaxCommandOutputBytes
-		}
-		return w.job.Stderr.Write(p)
+	if w.stream == nil {
+		return len(p), nil
 	}
-	if w.job.Stdout.Limit == 0 {
-		w.job.Stdout.Limit = w.runner.Cfg.Limits.MaxCommandOutputBytes
-	}
-	return w.job.Stdout.Write(p)
+	return w.stream.Write(p)
 }
 
 func (r *Runner) JobStatus(raw json.RawMessage) (any, error) {
@@ -226,7 +242,7 @@ func (r *Runner) JobStatus(raw json.RawMessage) (any, error) {
 	if job == nil {
 		return nil, fmt.Errorf("unknown job_id %q", jobID)
 	}
-	return job.snapshot(false, 0), nil
+	return job.snapshot(false, defaultJobOutputTailLines), nil
 }
 
 func (r *Runner) JobRead(raw json.RawMessage) (any, error) {
@@ -234,8 +250,8 @@ func (r *Runner) JobRead(raw json.RawMessage) (any, error) {
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
 	}
-	if a.TailBytes <= 0 {
-		a.TailBytes = 12000
+	if a.TailLines <= 0 {
+		a.TailLines = defaultJobOutputTailLines
 	}
 	r.jobMu.Lock()
 	job := r.jobs[a.JobID]
@@ -243,7 +259,7 @@ func (r *Runner) JobRead(raw json.RawMessage) (any, error) {
 	if job == nil {
 		return nil, fmt.Errorf("unknown job_id %q", a.JobID)
 	}
-	return job.snapshot(true, a.TailBytes), nil
+	return job.snapshot(true, a.TailLines), nil
 }
 
 func (r *Runner) JobCancel(raw json.RawMessage) (any, error) {
@@ -289,7 +305,7 @@ func (r *Runner) JobList(raw json.RawMessage) (any, error) {
 	r.jobMu.Unlock()
 	items := make([]map[string]any, 0, len(jobs))
 	for _, job := range jobs {
-		snapshot := job.snapshot(false, 0)
+		snapshot := job.snapshot(false, defaultJobOutputTailLines)
 		if !a.IncludeFinished {
 			if _, ok := snapshot["finished_at"]; ok {
 				continue
@@ -327,9 +343,8 @@ func (r *Runner) pruneFinishedJobs(now time.Time) {
 	}
 }
 
-func (j *commandJob) snapshot(includeOutput bool, tailBytes int) map[string]any {
+func (j *commandJob) snapshot(includeOutput bool, tailLines int) map[string]any {
 	j.mu.Lock()
-	defer j.mu.Unlock()
 	out := map[string]any{
 		"job_id":     j.ID,
 		"name":       j.Name,
@@ -353,29 +368,35 @@ func (j *commandJob) snapshot(includeOutput bool, tailBytes int) map[string]any 
 			}
 		}
 	}
+	j.mu.Unlock()
+
 	if includeOutput {
-		stdout := j.Stdout.String()
-		stderr := j.Stderr.String()
-		if j.Result != nil {
-			if value, ok := j.Result["stdout"].(string); ok && stdout == "" {
-				stdout = value
-			}
-			if value, ok := j.Result["stderr"].(string); ok && stderr == "" {
-				stderr = value
-			}
+		if tailLines <= 0 {
+			tailLines = defaultJobOutputTailLines
 		}
-		out["stdout_tail"] = tailString(stdout, tailBytes)
-		out["stderr_tail"] = tailString(stderr, tailBytes)
-		out["stdout_truncated"] = j.Stdout.Truncated || len(stdout) > tailBytes
-		out["stderr_truncated"] = j.Stderr.Truncated || len(stderr) > tailBytes
-		out["output_available"] = stdout != "" || stderr != "" || j.Result != nil
+		stdoutTail := outputTailResult{TailLines: tailLines}
+		stderrTail := outputTailResult{TailLines: tailLines}
+		if j.Stdout != nil {
+			stdoutTail = j.Stdout.Tail(tailLines)
+		}
+		if j.Stderr != nil {
+			stderrTail = j.Stderr.Tail(tailLines)
+		}
+		out["tail_mode"] = "lines"
+		out["tail_lines"] = tailLines
+		out["stdout_tail"] = stdoutTail.Text
+		out["stderr_tail"] = stderrTail.Text
+		out["stdout_truncated"] = stdoutTail.LinesTruncated || stdoutTail.LineShortRead || stdoutTail.TailShortRead || stdoutTail.DroppedChunks > 0
+		out["stderr_truncated"] = stderrTail.LinesTruncated || stderrTail.LineShortRead || stderrTail.TailShortRead || stderrTail.DroppedChunks > 0
+		out["stdout_lines_truncated"] = stdoutTail.LinesTruncated
+		out["stderr_lines_truncated"] = stderrTail.LinesTruncated
+		out["stdout_line_short_read"] = stdoutTail.LineShortRead
+		out["stderr_line_short_read"] = stderrTail.LineShortRead
+		out["stdout_tail_short_read"] = stdoutTail.TailShortRead
+		out["stderr_tail_short_read"] = stderrTail.TailShortRead
+		out["stdout_dropped_chunks"] = stdoutTail.DroppedChunks
+		out["stderr_dropped_chunks"] = stderrTail.DroppedChunks
+		out["output_available"] = stdoutTail.Available || stderrTail.Available
 	}
 	return out
-}
-
-func tailString(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-	return s[len(s)-maxBytes:]
 }
