@@ -161,7 +161,7 @@ func (l *liveHandler) Close() {
 	}
 }
 
-func watchConfig(configPath, _ string, _ string, interval time.Duration, live *liveHandler) {
+func watchConfig(configPath, _, _ string, interval time.Duration, live *liveHandler) {
 	currentHash, err := fileHash(configPath)
 	if err != nil {
 		slog.Warn("config reload disabled", "err", err)
