@@ -263,7 +263,7 @@ func tailOutputSnapshot(snap outputSnapshot, tailLines, maxTailBytes int, droppe
 	}
 }
 
-func linesToLimitedText(lines []outputLine, maxBytes int) (text string, lineShort bool, tailShort bool) {
+func linesToLimitedText(lines []outputLine, maxBytes int) (text string, lineShort, tailShort bool) {
 	for _, line := range lines {
 		if line.ShortRead {
 			lineShort = true
