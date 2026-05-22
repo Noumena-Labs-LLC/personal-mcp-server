@@ -336,7 +336,7 @@ func (r *Runner) persistentShellBusyResult(started time.Time, extra map[string]a
 func (r *Runner) persistentShellInitFailureResult(started time.Time, err error, extra map[string]any) map[string]any {
 	result := map[string]any{
 		"exit_code": -1, "ok": false, "busy": false, "retryable": true,
-		"timed_out": errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled),
+		"timed_out":   errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled),
 		"duration_ms": time.Since(started).Milliseconds(), "configured_timeout_seconds": r.Cfg.Limits.CommandTimeoutSeconds,
 		"stdout": "", "stderr": "", "stdout_truncated": false, "stderr_truncated": false,
 		"failure_phase": "persistent_shell_init", "error": err.Error(), "shell_pool_size": r.persistentShellPoolSize(),
