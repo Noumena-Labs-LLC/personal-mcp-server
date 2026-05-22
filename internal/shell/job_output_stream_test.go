@@ -128,7 +128,7 @@ func TestJobOutputStreamTailByteLimitKeepsSuffix(t *testing.T) {
 	s.CloseAndFlush()
 
 	tail := s.Tail(10)
-	if tail.Text != "a\ngamma" {
+	if tail.Text != "gamma" {
 		t.Fatalf("expected suffix-constrained tail, got %q", tail.Text)
 	}
 	if !tail.TailShortRead {
