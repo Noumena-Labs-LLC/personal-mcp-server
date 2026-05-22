@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"reflect"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,14 +19,16 @@ import (
 )
 
 type runtimeState struct {
-	mu sync.RWMutex
+	cfg     *config.Config
+	handler http.Handler
+	audit   *audit.Logger
+	runner  *shell.Runner
 
-	cfg       *config.Config
-	handler   http.Handler
-	audit     *audit.Logger
-	fileTools *fsx.Tools
-	projects  *project.Manager
-	runner    *shell.Runner
+	inFlight   atomic.Int64
+	draining   atomic.Bool
+	idleClosed atomic.Bool
+	closed     atomic.Bool
+	idle       chan struct{}
 }
 
 func buildRuntime(configPath, auditPath string) (*runtimeState, error) {
@@ -56,71 +56,61 @@ func buildRuntime(configPath, auditPath string) (*runtimeState, error) {
 	srv := mcphttp.New(cfg, aud, approvals, version)
 	registerTools(srv, cfg, fileTools, runner, projects)
 	registerResources(srv, cfg, fileTools)
-	return &runtimeState{cfg: cfg, handler: srv.Handler(), audit: aud, fileTools: fileTools, projects: projects, runner: runner}, nil
+	return &runtimeState{cfg: cfg, handler: srv.Handler(), audit: aud, runner: runner, idle: make(chan struct{})}, nil
+}
+
+func (r *runtimeState) acquire() bool {
+	if r == nil {
+		return false
+	}
+	r.inFlight.Add(1)
+	if r.draining.Load() {
+		r.release()
+		return false
+	}
+	return true
+}
+
+func (r *runtimeState) release() {
+	if r == nil {
+		return
+	}
+	if r.inFlight.Add(-1) == 0 && r.draining.Load() {
+		r.closeIdle()
+	}
+}
+
+func (r *runtimeState) drain() {
+	if r == nil {
+		return
+	}
+	r.draining.Store(true)
+	if r.inFlight.Load() == 0 {
+		r.closeIdle()
+	}
+}
+
+func (r *runtimeState) closeIdle() {
+	if r.idleClosed.CompareAndSwap(false, true) {
+		close(r.idle)
+	}
 }
 
 func (r *runtimeState) Close() {
 	if r == nil {
 		return
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.drain()
+	<-r.idle
+	if !r.closed.CompareAndSwap(false, true) {
+		return
+	}
 	if r.runner != nil {
 		r.runner.ClosePersistentShells()
 	}
 	if r.audit != nil {
 		_ = r.audit.Close()
 	}
-}
-
-func (r *runtimeState) ReloadConfig(next *config.Config) error {
-	if r == nil || next == nil {
-		return fmt.Errorf("runtime is not available")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if next.ListenAddr() != r.cfg.ListenAddr() {
-		return fmt.Errorf("server host or port changed: old=%s new=%s", r.cfg.ListenAddr(), next.ListenAddr())
-	}
-	if next.Server.Endpoint != r.cfg.Server.Endpoint {
-		return fmt.Errorf("server endpoint changed: old=%s new=%s", r.cfg.Server.Endpoint, next.Server.Endpoint)
-	}
-	if !reflect.DeepEqual(next.Tools, r.cfg.Tools) {
-		return fmt.Errorf("tool enablement/description changes require restart")
-	}
-	if !reflect.DeepEqual(next.Audit, r.cfg.Audit) {
-		return fmt.Errorf("audit log configuration changes require restart")
-	}
-
-	newSandbox := fsx.NewSandbox(next)
-	newProjects, err := project.NewManager(next, newSandbox)
-	if err != nil {
-		return fmt.Errorf("project config manager: %w", err)
-	}
-	newProjects.Global = r.cfg
-	newProjects.Sandbox = newSandbox
-
-	*r.cfg = *next
-	r.fileTools.Cfg = r.cfg
-	r.fileTools.Sandbox = newSandbox
-	r.fileTools.ProjectPolicy = newProjects
-	r.projects = newProjects
-	r.runner.Cfg = r.cfg
-	r.runner.Sandbox = newSandbox
-	r.runner.Projects = newProjects
-	r.runner.Specs = commandSpecsByName(r.cfg.Commands)
-	r.runner.ClosePersistentShells()
-	return nil
-}
-
-func commandSpecsByName(commands []config.CommandSpec) map[string]config.CommandSpec {
-	specs := map[string]config.CommandSpec{}
-	for i := range commands {
-		cmd := &commands[i]
-		specs[cmd.Name] = *cmd
-	}
-	return specs
 }
 
 type liveHandler struct {
@@ -134,34 +124,44 @@ func newLiveHandler(state *runtimeState) *liveHandler {
 }
 
 func (l *liveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	state, ok := l.runtime.Load().(*runtimeState)
-	if !ok || state == nil || state.handler == nil {
-		http.Error(w, "handler unavailable", http.StatusServiceUnavailable)
-		return
+	for {
+		state := l.Current()
+		if state == nil || state.handler == nil {
+			http.Error(w, "handler unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if state.acquire() {
+			state.handler.ServeHTTP(w, r)
+			state.release()
+			return
+		}
 	}
-	state.mu.RLock()
-	defer state.mu.RUnlock()
-	state.handler.ServeHTTP(w, r)
 }
 
 func (l *liveHandler) Current() *runtimeState {
+	if l == nil {
+		return nil
+	}
 	state, _ := l.runtime.Load().(*runtimeState)
 	return state
 }
 
 func (l *liveHandler) Swap(state *runtimeState) *runtimeState {
 	previous, _ := l.runtime.Swap(state).(*runtimeState)
+	if previous != nil {
+		previous.drain()
+	}
 	return previous
 }
 
 func (l *liveHandler) Close() {
-	state, _ := l.runtime.Load().(*runtimeState)
+	state := l.Current()
 	if state != nil {
 		state.Close()
 	}
 }
 
-func watchConfig(configPath, _, _ string, interval time.Duration, live *liveHandler) {
+func watchConfig(configPath, auditPath, listenAddr string, interval time.Duration, live *liveHandler) {
 	currentHash, err := fileHash(configPath)
 	if err != nil {
 		slog.Warn("config reload disabled", "err", err)
@@ -180,31 +180,27 @@ func watchConfig(configPath, _, _ string, interval time.Duration, live *liveHand
 		if nextHash == currentHash {
 			continue
 		}
-		nextCfg, loadErr := config.Load(configPath)
-		if loadErr != nil {
+		nextRuntime, buildErr := buildRuntime(configPath, auditPath)
+		if buildErr != nil {
 			if !haveRejected || nextHash != lastRejected {
-				slog.Warn("config reload rejected; keeping previous valid config", "err", loadErr)
+				slog.Warn("config reload rejected; keeping previous valid config", "err", buildErr)
 				lastRejected = nextHash
 				haveRejected = true
 			}
 			continue
 		}
-		state := live.Current()
-		if state == nil {
+		if nextRuntime.cfg.ListenAddr() != listenAddr {
+			nextRuntime.Close()
 			if !haveRejected || nextHash != lastRejected {
-				slog.Warn("config reload rejected; runtime unavailable")
+				slog.Warn("config reload rejected; server host or port changed", "old", listenAddr, "new", nextRuntime.cfg.ListenAddr())
 				lastRejected = nextHash
 				haveRejected = true
 			}
 			continue
 		}
-		if err := state.ReloadConfig(nextCfg); err != nil {
-			if !haveRejected || nextHash != lastRejected {
-				slog.Warn("config reload rejected; keeping previous valid config", "err", err)
-				lastRejected = nextHash
-				haveRejected = true
-			}
-			continue
+		previous := live.Swap(nextRuntime)
+		if previous != nil {
+			go previous.Close()
 		}
 		currentHash = nextHash
 		haveRejected = false
