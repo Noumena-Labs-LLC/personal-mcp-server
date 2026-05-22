@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
 )
@@ -85,7 +86,7 @@ type rotatingLogWriter struct {
 	queue      chan []byte
 	done       chan struct{}
 	closed     bool
-	dropped    uint64
+	dropped    atomic.Uint64
 }
 
 func newRotatingLogWriter(path string, maxBytes int64, maxBackups int) (*rotatingLogWriter, error) {
@@ -121,10 +122,17 @@ func (w *rotatingLogWriter) Write(p []byte) (int, error) {
 	select {
 	case w.queue <- entry:
 	default:
-		w.dropped++
+		w.dropped.Add(1)
 	}
 	w.mu.Unlock()
 	return len(p), nil
+}
+
+func (w *rotatingLogWriter) Dropped() uint64 {
+	if w == nil {
+		return 0
+	}
+	return w.dropped.Load()
 }
 
 func (w *rotatingLogWriter) writeLoop() {
