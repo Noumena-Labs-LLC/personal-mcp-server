@@ -17,7 +17,7 @@ import (
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/fsx"
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/mcphttp"
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/project"
-	"github.com/noumena-labs-LLC/personal-mcp-server/internal/shell"
+	"github.com/noumena-labs-llc/personal-mcp-server/internal/shell"
 )
 
 type runtimeState struct {
