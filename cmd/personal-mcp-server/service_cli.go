@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/atomicfile"
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
