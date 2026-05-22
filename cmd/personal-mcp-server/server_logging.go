@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
@@ -77,16 +76,17 @@ func setupServerLogging(cfg *config.Config, levelOverride, pathOverride string, 
 }
 
 type rotatingLogWriter struct {
-	mu         sync.Mutex
 	file       *os.File
 	path       string
 	maxBytes   int64
 	maxBackups int
 	sizeBytes  int64
 	queue      chan []byte
+	closeCh    chan struct{}
 	done       chan struct{}
-	closed     bool
+	closed     atomic.Bool
 	dropped    atomic.Uint64
+	closeErr   atomic.Value
 }
 
 func newRotatingLogWriter(path string, maxBytes int64, maxBackups int) (*rotatingLogWriter, error) {
@@ -107,16 +107,17 @@ func newRotatingLogWriter(path string, maxBytes int64, maxBackups int) (*rotatin
 	if info, statErr := f.Stat(); statErr == nil {
 		sizeBytes = info.Size()
 	}
-	w := &rotatingLogWriter{file: f, path: path, maxBytes: maxBytes, maxBackups: maxBackups, sizeBytes: sizeBytes, queue: make(chan []byte, 1024), done: make(chan struct{})}
+	w := &rotatingLogWriter{file: f, path: path, maxBytes: maxBytes, maxBackups: maxBackups, sizeBytes: sizeBytes, queue: make(chan []byte, 1024), closeCh: make(chan struct{}), done: make(chan struct{})}
 	go w.writeLoop()
 	return w, nil
 }
 
 func (w *rotatingLogWriter) Write(p []byte) (int, error) {
+	if w == nil || w.closed.Load() {
+		return 0, os.ErrClosed
+	}
 	entry := append([]byte(nil), p...)
-	w.mu.Lock()
-	if w.closed {
-		w.mu.Unlock()
+	if w.closed.Load() {
 		return 0, os.ErrClosed
 	}
 	select {
@@ -124,7 +125,6 @@ func (w *rotatingLogWriter) Write(p []byte) (int, error) {
 	default:
 		w.dropped.Add(1)
 	}
-	w.mu.Unlock()
 	return len(p), nil
 }
 
@@ -137,14 +137,30 @@ func (w *rotatingLogWriter) Dropped() uint64 {
 
 func (w *rotatingLogWriter) writeLoop() {
 	defer close(w.done)
-	for p := range w.queue {
-		_ = w.writeSync(p)
+	for {
+		select {
+		case p := <-w.queue:
+			_ = w.writeSync(p)
+		case <-w.closeCh:
+			w.drainQueue()
+			w.closeFile()
+			return
+		}
+	}
+}
+
+func (w *rotatingLogWriter) drainQueue() {
+	for {
+		select {
+		case p := <-w.queue:
+			_ = w.writeSync(p)
+		default:
+			return
+		}
 	}
 }
 
 func (w *rotatingLogWriter) writeSync(p []byte) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	incoming := int64(len(p))
 	if err := w.rotateIfNeeded(incoming); err != nil {
 		return err
@@ -155,26 +171,32 @@ func (w *rotatingLogWriter) writeSync(p []byte) error {
 }
 
 func (w *rotatingLogWriter) Close() error {
-	w.mu.Lock()
-	if w.closed {
-		w.mu.Unlock()
+	if w == nil {
 		return nil
 	}
-	w.closed = true
-	close(w.queue)
-	done := w.done
-	w.mu.Unlock()
-	if done != nil {
-		<-done
+	if w.closed.CompareAndSwap(false, true) {
+		close(w.closeCh)
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	if w.done != nil {
+		<-w.done
+	}
+	if v := w.closeErr.Load(); v != nil {
+		if err, ok := v.(error); ok {
+			return err
+		}
+		return fmt.Errorf("unexpected stored diagnostic log close error type %T", v)
+	}
+	return nil
+}
+
+func (w *rotatingLogWriter) closeFile() {
 	if w.file == nil {
-		return nil
+		return
 	}
-	err := w.file.Close()
+	if err := w.file.Close(); err != nil {
+		w.closeErr.Store(err)
+	}
 	w.file = nil
-	return err
 }
 
 func (w *rotatingLogWriter) rotateIfNeeded(incoming int64) error {
