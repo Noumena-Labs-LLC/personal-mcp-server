@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
 )
@@ -55,17 +54,4 @@ func doctor(args []string) {
 	if failed {
 		os.Exit(1)
 	}
-}
-
-func checkTokenFilePermissions(path string) {
-	info, err := os.Stat(path)
-	if err != nil {
-		fmt.Printf("auth token file permissions: WARN: %v\n", err)
-		return
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		fmt.Printf("auth token file permissions: WARN: %s is readable by group or others (%s)\n", path, info.Mode().Perm())
-		return
-	}
-	fmt.Println("auth token file permissions: ok")
 }
