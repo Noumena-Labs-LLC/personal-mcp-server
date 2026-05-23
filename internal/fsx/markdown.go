@@ -18,7 +18,8 @@ type MarkdownSection struct {
 }
 
 func ParseMarkdownSections(content string) []MarkdownSection {
-	return markdownSections(content)
+	sections, _ := markdownSectionsContext(context.Background(), content)
+	return sections
 }
 
 func ParseMarkdownSectionsContext(ctx context.Context, content string) ([]MarkdownSection, error) {
@@ -40,11 +41,6 @@ type markdownHeading struct {
 }
 
 var atxHeadingRE = regexp.MustCompile(`^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$`)
-
-func markdownSections(content string) []MarkdownSection {
-	sections, _ := markdownSectionsContext(context.Background(), content)
-	return sections
-}
 
 func markdownSectionsContext(ctx context.Context, content string) ([]MarkdownSection, error) {
 	lines := splitLinesKeepEnd(content)

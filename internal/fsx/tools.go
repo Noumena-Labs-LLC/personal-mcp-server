@@ -153,6 +153,11 @@ type ListDirArgs struct {
 }
 
 func (t *Tools) ListDir(raw json.RawMessage) (any, error) {
+	return t.ListDirContext(context.Background(), raw)
+}
+
+func (t *Tools) ListDirContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a ListDirArgs
 	_ = json.Unmarshal(raw, &a)
 	if a.MaxEntries <= 0 || a.MaxEntries > 1000 {
@@ -181,6 +186,9 @@ func (t *Tools) ListDir(raw json.RawMessage) (any, error) {
 	entries := []entry{}
 	rootForRel := p
 	walk := func(path string, d os.DirEntry, walkErr error) error {
+		if err := contextErr(ctx); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -1815,7 +1823,7 @@ func (t *Tools) readMarkdownForToolContext(ctx context.Context, path, cwd, pathM
 	if err := t.enforceFilePolicy("read", displayPath, p, map[string]any{"tool": tool, "cwd": cwd}); err != nil {
 		return "", "", nil, err
 	}
-	content, _, _, err = t.readMarkdownFile(p)
+	content, _, _, err = t.readMarkdownFileContext(ctx, p)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -1830,6 +1838,10 @@ func (t *Tools) readMarkdownForToolContext(ctx context.Context, path, cwd, pathM
 }
 
 func (t *Tools) readMarkdownFile(path string) (content string, info os.FileInfo, sections []MarkdownSection, err error) {
+	return t.readMarkdownFileContext(context.Background(), path)
+}
+
+func (t *Tools) readMarkdownFileContext(ctx context.Context, path string) (content string, info os.FileInfo, sections []MarkdownSection, err error) {
 	info, err = os.Stat(path)
 	if err != nil {
 		return "", nil, nil, err
@@ -1848,7 +1860,14 @@ func (t *Tools) readMarkdownFile(path string) (content string, info os.FileInfo,
 		return "", nil, nil, errors.New("refusing binary file")
 	}
 	content = string(b)
-	return content, info, markdownSections(content), nil
+	if err := contextErr(ctx); err != nil {
+		return "", nil, nil, err
+	}
+	sections, err = markdownSectionsContext(ctx, content)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return content, info, sections, nil
 }
 
 func (t *Tools) writeMarkdownUpdate(path, displayPath, cwd, original, updated string, mode os.FileMode, dryRun, createBackup bool, extra map[string]any) (any, error) {

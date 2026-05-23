@@ -124,18 +124,17 @@ func newLiveHandler(state *runtimeState) *liveHandler {
 }
 
 func (l *liveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for {
-		state := l.Current()
-		if state == nil || state.handler == nil {
-			http.Error(w, "handler unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if state.acquire() {
-			state.handler.ServeHTTP(w, r)
-			state.release()
-			return
-		}
+	state := l.Current()
+	if state == nil || state.handler == nil {
+		http.Error(w, "handler unavailable", http.StatusServiceUnavailable)
+		return
 	}
+	if !state.acquire() {
+		http.Error(w, "handler draining", http.StatusServiceUnavailable)
+		return
+	}
+	state.handler.ServeHTTP(w, r)
+	state.release()
 }
 
 func (l *liveHandler) Current() *runtimeState {

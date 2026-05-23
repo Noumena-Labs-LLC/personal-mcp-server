@@ -3,6 +3,7 @@ package fsx
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,6 +125,11 @@ type ReadFileArgs struct {
 const highOffsetReadLineThreshold = 5000
 
 func (t *Tools) ReadFile(raw json.RawMessage) (any, error) {
+	return t.ReadFileContext(context.Background(), raw)
+}
+
+func (t *Tools) ReadFileContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a ReadFileArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -178,7 +184,7 @@ func (t *Tools) ReadFile(raw json.RawMessage) (any, error) {
 			"truncated":       true,
 		}, nil
 	}
-	content, endLine, truncated, bytesRead, err := readTextWindow(p, a.StartLine, a.MaxLines, t.Cfg.Limits.MaxReadBytes)
+	content, endLine, truncated, bytesRead, err := readTextWindowContext(ctx, p, a.StartLine, a.MaxLines, t.Cfg.Limits.MaxReadBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +206,11 @@ type TailFileArgs struct {
 }
 
 func (t *Tools) TailFile(raw json.RawMessage) (any, error) {
+	return t.TailFileContext(context.Background(), raw)
+}
+
+func (t *Tools) TailFileContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a TailFileArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -224,14 +235,14 @@ func (t *Tools) TailFile(raw json.RawMessage) (any, error) {
 	if info.IsDir() {
 		return nil, errors.New("cannot tail a directory")
 	}
-	content, returnedLines, bytesRead, truncated, err := tailTextFile(p, a.Lines, t.Cfg.Limits.MaxReadBytes)
+	content, returnedLines, bytesRead, truncated, err := tailTextFileContext(ctx, p, a.Lines, t.Cfg.Limits.MaxReadBytes)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"content": content, "path": displayPath, "cwd": a.Cwd, "lines_requested": a.Lines, "lines_returned": returnedLines, "truncated": truncated, "bytes_read": bytesRead, "size_bytes": info.Size()}, nil
 }
 
-func tailTextFile(path string, lines int, maxBytes int64) (content string, returnedLines int, bytesRead int64, truncated bool, err error) {
+func tailTextFileContext(ctx context.Context, path string, lines int, maxBytes int64) (content string, returnedLines int, bytesRead int64, truncated bool, err error) {
 	f, err := os.Open(path) //nolint:gosec // path was resolved through the sandbox by the caller.
 	if err != nil {
 		return "", 0, 0, false, err
@@ -251,6 +262,9 @@ func tailTextFile(path string, lines int, maxBytes int64) (content string, retur
 	chunkSize := int64(32 * 1024)
 	var buf []byte
 	for offset := info.Size(); offset > 0; {
+		if err := contextErr(ctx); err != nil {
+			return "", 0, bytesRead, false, err
+		}
 		readSize := chunkSize
 		if offset < readSize {
 			readSize = offset
@@ -306,7 +320,7 @@ func countLinesInBytes(buf []byte) int {
 	return n
 }
 
-func readTextWindow(path string, startLine, maxLines int, maxBytes int64) (content string, endLine int, truncated bool, bytesRead int64, err error) {
+func readTextWindowContext(ctx context.Context, path string, startLine, maxLines int, maxBytes int64) (content string, endLine int, truncated bool, bytesRead int64, err error) {
 	f, err := os.Open(path) //nolint:gosec // path was resolved through the sandbox by the caller.
 	if err != nil {
 		return "", 0, false, 0, err
@@ -321,6 +335,9 @@ func readTextWindow(path string, startLine, maxLines int, maxBytes int64) (conte
 	lineNo := 0
 	collected := 0
 	for {
+		if err := contextErr(ctx); err != nil {
+			return "", 0, false, bytesRead, err
+		}
 		line, readErr := reader.ReadString('\n')
 		if line != "" {
 			bytesRead += int64(len(line))

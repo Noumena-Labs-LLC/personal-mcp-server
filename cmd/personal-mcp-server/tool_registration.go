@@ -196,7 +196,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "fs_list_dir", Description: cfg.ToolDescription("fs_list_dir", "List entries under a directory inside configured roots. Bounded by max_entries and does not follow symlinks outside roots."), InputSchema: map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "recursive": map[string]any{"type": "boolean"}, "include_hidden": map[string]any{"type": "boolean"}, "max_entries": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}},
-		}, Handler: ft.ListDir})
+		}, Handler: ft.ListDir, ContextHandler: ft.ListDirContext})
 	}
 	if cfg.Tools.GetFileInfo.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_get_file_info", Description: cfg.ToolDescription("fs_get_file_info", "Get safe metadata for a file or directory inside configured roots without reading contents, including size, text sniffing, line estimate, and large-file navigation hints."), InputSchema: pathSchema, Handler: ft.GetFileInfo})
@@ -205,13 +205,13 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "fs_tail_file", Description: cfg.ToolDescription("fs_tail_file", "Read the last lines of a text or log file inside configured roots without scanning the whole file. Use this for large logs and recent diagnostics."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "lines": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}},
-		}, Handler: ft.TailFile})
+		}, Handler: ft.TailFile, ContextHandler: ft.TailFileContext})
 	}
 	if cfg.Tools.ReadFile.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_read_file", Description: cfg.ToolDescription("fs_read_file", "Read a bounded line range from a text file inside configured roots. Omitted max_lines defaults to 200; whole_file=true must be explicit for full-file reads. Secret-looking and binary files are refused."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "start_line": map[string]any{"type": "integer", "minimum": 1}, "max_lines": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}, "whole_file": map[string]any{"type": "boolean"}},
-		}, Handler: ft.ReadFile})
+		}, Handler: ft.ReadFile, ContextHandler: ft.ReadFileContext})
 	}
 	if cfg.Tools.SearchText.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_search_text", Description: cfg.ToolDescription("fs_search_text", "Search text files inside configured roots. Plain substring search by default, regex optional, with result/file-size limits and offset pagination."), InputSchema: map[string]any{
