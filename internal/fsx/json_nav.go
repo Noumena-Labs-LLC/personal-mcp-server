@@ -1,6 +1,7 @@
 package fsx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,6 +159,11 @@ func (t *Tools) JSONSlice(raw json.RawMessage) (any, error) {
 }
 
 func (t *Tools) JSONSearch(raw json.RawMessage) (any, error) {
+	return t.jsonSearchContext(context.Background(), raw)
+}
+
+func (t *Tools) jsonSearchContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a JSONSearchArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -176,6 +182,9 @@ func (t *Tools) JSONSearch(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	typeFilter := map[string]bool{}
 	for _, typ := range a.TypeFilter {
 		typeFilter[strings.TrimSpace(typ)] = true
@@ -185,13 +194,16 @@ func (t *Tools) JSONSearch(raw json.RawMessage) (any, error) {
 		q = strings.ToLower(q)
 	}
 	matches := []map[string]any{}
-	var visit func(v any, pointer string)
-	visit = func(v any, pointer string) {
+	var visit func(v any, pointer string) error
+	visit = func(v any, pointer string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if len(matches) >= a.Limit {
-			return
+			return nil
 		}
 		if a.PointerPrefix != "" && pointer != "" && !strings.HasPrefix(pointer, a.PointerPrefix) && !strings.HasPrefix(a.PointerPrefix, pointer) {
-			return
+			return nil
 		}
 		switch vv := v.(type) {
 		case map[string]any:
@@ -211,18 +223,22 @@ func (t *Tools) JSONSearch(raw json.RawMessage) (any, error) {
 					matches = append(matches, map[string]any{"pointer": childPtr, "match": "key", "type": childType, "preview": previewJSON(vv[k])})
 				}
 				if len(matches) >= a.Limit {
-					return
+					return nil
 				}
-				visit(vv[k], childPtr)
+				if err := visit(vv[k], childPtr); err != nil {
+					return err
+				}
 				if len(matches) >= a.Limit {
-					return
+					return nil
 				}
 			}
 		case []any:
 			for i, child := range vv {
-				visit(child, joinJSONPointer(pointer, strconv.Itoa(i)))
+				if err := visit(child, joinJSONPointer(pointer, strconv.Itoa(i))); err != nil {
+					return err
+				}
 				if len(matches) >= a.Limit {
-					return
+					return nil
 				}
 			}
 		default:
@@ -237,8 +253,11 @@ func (t *Tools) JSONSearch(raw json.RawMessage) (any, error) {
 				}
 			}
 		}
+		return nil
 	}
-	visit(root, "")
+	if err := visit(root, ""); err != nil {
+		return nil, err
+	}
 	return map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "query": a.Query, "pointer_prefix": a.PointerPrefix, "type_filter": a.TypeFilter, "matches": matches, "returned": len(matches), "limit": a.Limit, "truncated": len(matches) >= a.Limit, "bytes_read": size}, nil
 }
 
