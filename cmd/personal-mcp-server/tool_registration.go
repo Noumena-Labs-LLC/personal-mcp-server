@@ -244,7 +244,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 				"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1}, "max_replacements": map[string]any{"type": "integer", "minimum": 1, "default": 1}, "allow_unlimited": map[string]any{"type": "boolean"},
 				"dry_run": map[string]any{"type": "boolean"}, "create_backup": map[string]any{"type": "boolean"},
 			},
-		}, Handler: ft.ReplaceRegex})
+		}, Handler: ft.ReplaceRegex, ContextHandler: ft.ReplaceRegexContext})
 	}
 	if cfg.Tools.ApplyPatch.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_apply_patch", Description: cfg.ToolDescription("fs_apply_patch", "Apply exact old/new text replacements to one file inside configured roots. Use either top-level old/new or edits=[{old,new,expected_replacements?}]. expected_replacements defaults to 1 and caps replacements; mismatched found counts return warnings, while zero matches fail. Supports optional dry_run and returns a compact diff."), InputSchema: map[string]any{
@@ -254,7 +254,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 				"edits":   map[string]any{"type": "array", "items": map[string]any{"type": "object", "required": []string{"old", "new"}, "additionalProperties": false, "properties": map[string]any{"old": map[string]any{"type": "string"}, "new": map[string]any{"type": "string"}, "expected_replacements": map[string]any{"type": "integer", "minimum": 1, "default": 1}}}},
 				"dry_run": map[string]any{"type": "boolean"}, "create_backup": map[string]any{"type": "boolean"},
 			},
-		}, Handler: ft.ApplyPatch})
+		}, Handler: ft.ApplyPatch, ContextHandler: ft.ApplyPatchContext})
 	}
 	if cfg.Tools.ApplyUnifiedPatch.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_apply_unified_patch", Description: cfg.ToolDescription("fs_apply_unified_patch", "Apply a standard unified diff patch inside configured roots. Supports optional dry_run and rejects deletes, renames, binary patches, and paths outside roots."), InputSchema: map[string]any{
@@ -266,43 +266,43 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "fs_create_file", Description: cfg.ToolDescription("fs_create_file", "Create a new text file inside configured roots. Refuses to overwrite existing files."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path", "content"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "content": map[string]any{"type": "string"}, "fail_if_exists": map[string]any{"type": "boolean"}, "create_dirs": map[string]any{"type": "boolean"}},
-		}, Handler: ft.CreateFile})
+		}, Handler: ft.CreateFile, ContextHandler: ft.CreateFileContext})
 	}
 	if cfg.Tools.CreateDir.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_create_dir", Description: cfg.ToolDescription("fs_create_dir", "Create a directory inside configured roots with mkdir -p semantics by default. Refuses file conflicts and supports optional dry_run."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "parents": map[string]any{"type": "boolean", "default": true}, "dry_run": map[string]any{"type": "boolean"}},
-		}, Handler: ft.CreateDir})
+		}, Handler: ft.CreateDir, ContextHandler: ft.CreateDirContext})
 	}
 	if cfg.Tools.ReplaceFile.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_replace_file", Description: cfg.ToolDescription("fs_replace_file", "Replace one existing text file inside configured roots. Refuses directories and binary files, supports create_backup, and returns a compact diff."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path", "content"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "content": map[string]any{"type": "string"}, "create_backup": map[string]any{"type": "boolean"}},
-		}, Handler: ft.ReplaceFile})
+		}, Handler: ft.ReplaceFile, ContextHandler: ft.ReplaceFileContext})
 	}
 	if cfg.Tools.DeleteFile.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_delete_file", Description: cfg.ToolDescription("fs_delete_file", "Delete one existing file inside configured roots. Refuses directories."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema()},
-		}, Handler: ft.DeleteFile})
+		}, Handler: ft.DeleteFile, ContextHandler: ft.DeleteFileContext})
 	}
 	if cfg.Tools.DeleteFiles.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_delete_files", Description: cfg.ToolDescription("fs_delete_files", "Delete multiple files inside configured roots. Refuses directories and enforces max_files."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"paths"}, "additionalProperties": false,
 			"properties": map[string]any{"paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "allow_missing": map[string]any{"type": "boolean"}, "max_files": map[string]any{"type": "integer", "minimum": 1, "maximum": 100}},
-		}, Handler: ft.DeleteFiles})
+		}, Handler: ft.DeleteFiles, ContextHandler: ft.DeleteFilesContext})
 	}
 	if cfg.Tools.MoveFile.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_move_file", Description: cfg.ToolDescription("fs_move_file", "Move or rename one existing file inside configured roots. Refuses directories and refuses destination overwrites unless overwrite=true."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"source_path", "dest_path"}, "additionalProperties": false,
 			"properties": map[string]any{"source_path": map[string]any{"type": "string"}, "dest_path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "overwrite": map[string]any{"type": "boolean"}},
-		}, Handler: ft.MoveFile})
+		}, Handler: ft.MoveFile, ContextHandler: ft.MoveFileContext})
 	}
 	if cfg.Tools.AppendFile.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_append_file", Description: cfg.ToolDescription("fs_append_file", "Append text to a file inside configured roots, optionally creating it. Respects file policy and supports optional dry_run, compact diffs, and atomic writes."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path", "content"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "content": map[string]any{"type": "string"}, "create_if_missing": map[string]any{"type": "boolean"}, "ensure_newline": map[string]any{"type": "boolean"}, "dry_run": map[string]any{"type": "boolean"}, "create_backup": map[string]any{"type": "boolean"}},
-		}, Handler: ft.AppendFile})
+		}, Handler: ft.AppendFile, ContextHandler: ft.AppendFileContext})
 	}
 	if cfg.Tools.MarkdownOutline.Enabled {
 		s.Register(mcphttp.Tool{Name: "md_outline", Description: cfg.ToolDescription("md_outline", "Return a section outline for a Markdown file without reading the full document into the model. Ignores headings inside fenced code blocks."), InputSchema: map[string]any{
