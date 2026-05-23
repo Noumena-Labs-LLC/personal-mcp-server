@@ -3,6 +3,7 @@ package mcphttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,6 +75,46 @@ func TestInitializeToolsAndPrompts(t *testing.T) {
 		if !strings.Contains(rr.Body.String(), `"jsonrpc":"2.0"`) {
 			t.Fatalf("missing jsonrpc response: %s", rr.Body.String())
 		}
+	}
+}
+
+func TestContextHandlerReceivesRequestContext(t *testing.T) {
+	s := testServer(t)
+	type ctxKey struct{}
+	want := "ctx-ok"
+	s.Register(Tool{
+		Name:        "ctx_echo",
+		Description: "ctx_echo",
+		InputSchema: map[string]any{"type": "object"},
+		ContextHandler: func(ctx context.Context, _ json.RawMessage) (any, error) {
+			if got, _ := ctx.Value(ctxKey{}).(string); got != want {
+				return nil, fmt.Errorf("missing context value: got %q", got)
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+	reqCtx := context.WithValue(context.Background(), ctxKey{}, want)
+	req := httptest.NewRequestWithContext(reqCtx, http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ctx_echo","arguments":{}}}`))
+	req.Host = "127.0.0.1:3929"
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Result.Content) != 1 || !strings.Contains(resp.Result.Content[0].Text, `"ok": true`) {
+		t.Fatalf("expected ok response, got %s", rr.Body.String())
 	}
 }
 
