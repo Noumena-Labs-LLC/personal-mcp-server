@@ -18,13 +18,17 @@ import (
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
 )
 
-type ToolFunc func(json.RawMessage) (any, error)
+type (
+	ToolFunc        func(json.RawMessage) (any, error)
+	ToolContextFunc func(context.Context, json.RawMessage) (any, error)
+)
 
 type Tool struct {
-	Name        string
-	Description string
-	InputSchema any
-	Handler     ToolFunc
+	Name           string
+	Description    string
+	InputSchema    any
+	Handler        ToolFunc
+	ContextHandler ToolContextFunc
 }
 
 type Prompt struct {
@@ -66,12 +70,22 @@ func New(c *config.Config, a *audit.Logger, approvals *approval.Manager, serverV
 	return &Server{Cfg: c, Audit: a, Approvals: approvals, MCP: server}
 }
 
+func (t Tool) call(ctx context.Context, args json.RawMessage) (any, error) {
+	if t.ContextHandler != nil {
+		return t.ContextHandler(ctx, args)
+	}
+	if t.Handler == nil {
+		return nil, fmt.Errorf("tool %q has no handler", t.Name)
+	}
+	return t.Handler(args)
+}
+
 func (s *Server) Register(t Tool) { //nolint:nilerr // MCP tool errors are returned as CallToolResult.IsError, per protocol.
 	s.MCP.AddTool(&mcp.Tool{
 		Name:        t.Name,
 		Description: t.Description,
 		InputSchema: t.InputSchema,
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		started := time.Now()
 		args := json.RawMessage(`{}`)
 		if req != nil && req.Params != nil && len(req.Params.Arguments) > 0 {
@@ -79,7 +93,7 @@ func (s *Server) Register(t Tool) { //nolint:nilerr // MCP tool errors are retur
 		}
 
 		handlerStarted := time.Now()
-		out, err := t.Handler(args)
+		out, err := t.call(ctx, args)
 		handlerDuration := time.Since(handlerStarted)
 
 		fields := map[string]any{
