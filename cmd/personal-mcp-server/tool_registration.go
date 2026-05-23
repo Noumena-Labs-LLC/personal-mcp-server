@@ -429,7 +429,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "cmd_run_argv", Description: cfg.ToolDescription("cmd_run_argv", "Run an argv-style command if command_policy allows it or after approval. No shell strings, pipes, redirects, glob expansion, or background jobs."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"exec"}, "additionalProperties": false,
 			"properties": map[string]any{"exec": map[string]any{"type": "string"}, "args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "cwd": map[string]any{"type": "string"}},
-		}, Handler: r.RunArgv})
+		}, Handler: r.RunArgv, ContextHandler: r.RunArgvContext})
 	}
 	if cfg.Tools.RunSequence.Enabled {
 		s.Register(mcphttp.Tool{Name: "cmd_run_sequence", Description: cfg.ToolDescription("cmd_run_sequence", "Run one configured command sequence from global config or a trusted project .personal-mcp-server.toml. Steps reference existing named commands; mode is stop_on_failure or continue. No raw shell chaining syntax."), InputSchema: map[string]any{
@@ -447,7 +447,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 			"type": "object", "required": []string{"name"}, "additionalProperties": false,
 			"properties": map[string]any{"name": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "extra_args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
 		}
-		s.Register(mcphttp.Tool{Name: "cmd_run_named", Description: cfg.ToolDescription("cmd_run_named", "Run one named command from global config or a trusted project .personal-mcp-server.toml. If cwd is supplied in the tool call it wins; otherwise a command-level cwd may be used. Default run_mode is direct argv; trusted project commands may opt into persistent_shell when globally enabled. Use cmd_list_named with cwd to discover commands, cwd, run_mode, shell, and extra_args rules. No raw user-provided shell strings or shell job control; use cmd_start_named for server-supervised background jobs."), InputSchema: namedCommandSchema, Handler: r.RunNamed})
+		s.Register(mcphttp.Tool{Name: "cmd_run_named", Description: cfg.ToolDescription("cmd_run_named", "Run one named command from global config or a trusted project .personal-mcp-server.toml. If cwd is supplied in the tool call it wins; otherwise a command-level cwd may be used. Default run_mode is direct argv; trusted project commands may opt into persistent_shell when globally enabled. Use cmd_list_named with cwd to discover commands, cwd, run_mode, shell, and extra_args rules. No raw user-provided shell strings or shell job control; use cmd_start_named for server-supervised background jobs."), InputSchema: namedCommandSchema, Handler: r.RunNamed, ContextHandler: r.RunNamedContext})
 		s.Register(mcphttp.Tool{Name: "cmd_start_named", Description: cfg.ToolDescription("cmd_start_named", "Start one named command as a server-supervised background job and return a job_id. Uses the same named-command cwd resolution, validation, and timeout policy as cmd_run_named."), InputSchema: namedCommandSchema, Handler: r.StartNamed})
 		jobIDSchema := map[string]any{
 			"type": "object", "required": []string{"job_id"}, "additionalProperties": false,
