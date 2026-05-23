@@ -24,9 +24,9 @@ type ToolContextFunc func(context.Context, json.RawMessage) (any, error)
 type Tool struct {
 	Name           string
 	Description    string
-	InputSchema     any
-	Handler         ToolFunc
-	ContextHandler  ToolContextFunc
+	InputSchema    any
+	Handler        ToolFunc
+	ContextHandler ToolContextFunc
 }
 
 type Prompt struct {
