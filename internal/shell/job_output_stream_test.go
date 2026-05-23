@@ -151,3 +151,26 @@ func TestJobOutputStreamWriteAfterCloseIsIgnored(t *testing.T) {
 		t.Fatalf("write after close should be ignored, got %q", tail.Text)
 	}
 }
+
+func TestJobOutputStreamCloseAndFlushTimesOutWhenRunDoesNotFinish(t *testing.T) {
+	oldTimeout := jobOutputCloseTimeout
+	jobOutputCloseTimeout = 5 * time.Millisecond
+	t.Cleanup(func() {
+		jobOutputCloseTimeout = oldTimeout
+	})
+
+	s := &jobOutputStream{
+		ch:   make(chan jobOutputMessage),
+		done: make(chan struct{}),
+	}
+
+	start := time.Now()
+	s.CloseAndFlush()
+	elapsed := time.Since(start)
+	if elapsed < 5*time.Millisecond {
+		t.Fatalf("CloseAndFlush returned too quickly: %s", elapsed)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("CloseAndFlush took too long: %s", elapsed)
+	}
+}

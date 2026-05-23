@@ -133,8 +133,8 @@ func (l *liveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "handler draining", http.StatusServiceUnavailable)
 		return
 	}
+	defer state.release()
 	state.handler.ServeHTTP(w, r)
-	state.release()
 }
 
 func (l *liveHandler) Current() *runtimeState {
