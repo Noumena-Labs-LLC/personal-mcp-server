@@ -3,6 +3,7 @@ package fsx
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,6 +141,11 @@ func (t *Tools) openJSONL(path, cwd, pathMode string) (file *os.File, displayPat
 }
 
 func (t *Tools) JSONLRead(raw json.RawMessage) (any, error) {
+	return t.jsonLReadContext(context.Background(), raw)
+}
+
+func (t *Tools) jsonLReadContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a JSONLReadArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -155,7 +161,7 @@ func (t *Tools) JSONLRead(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	records, scanned, malformed, empty, err := readJSONLPage(f, a.Offset, a.Limit)
+	records, scanned, malformed, empty, err := readJSONLPageContext(ctx, f, a.Offset, a.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +169,11 @@ func (t *Tools) JSONLRead(raw json.RawMessage) (any, error) {
 }
 
 func (t *Tools) JSONLTail(raw json.RawMessage) (any, error) {
+	return t.jsonLTailContext(context.Background(), raw)
+}
+
+func (t *Tools) jsonLTailContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a JSONLTailArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -180,6 +191,9 @@ func (t *Tools) JSONLTail(raw json.RawMessage) (any, error) {
 	records := []any{}
 	malformed, empty, scanned := 0, 0, 0
 	for scanner.Scan() {
+		if err := contextErr(ctx); err != nil {
+			return nil, err
+		}
 		scanned++
 		rec, status := parseJSONLLine(scanner.Text())
 		switch status {
@@ -201,6 +215,11 @@ func (t *Tools) JSONLTail(raw json.RawMessage) (any, error) {
 }
 
 func (t *Tools) JSONLInfo(raw json.RawMessage) (any, error) {
+	return t.jsonLInfoContext(context.Background(), raw)
+}
+
+func (t *Tools) jsonLInfoContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a JSONLInfoArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -225,6 +244,9 @@ func (t *Tools) JSONLInfo(raw json.RawMessage) (any, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), int(t.Cfg.Limits.MaxReadBytes))
 	valid, malformed, empty, lines := 0, 0, 0, 0
 	for scanner.Scan() {
+		if err := contextErr(ctx); err != nil {
+			return nil, err
+		}
 		lines++
 		rec, status := parseJSONLLine(scanner.Text())
 		if status == "empty" {
@@ -272,6 +294,11 @@ func (t *Tools) JSONLInfo(raw json.RawMessage) (any, error) {
 }
 
 func (t *Tools) JSONLFilter(raw json.RawMessage) (any, error) {
+	return t.jsonLFilterContext(context.Background(), raw)
+}
+
+func (t *Tools) jsonLFilterContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a JSONLFilterArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -306,6 +333,9 @@ func (t *Tools) JSONLFilter(raw json.RawMessage) (any, error) {
 	records := []any{}
 	scanned, valid, matched, malformed, empty := 0, 0, 0, 0, 0
 	for scanner.Scan() {
+		if err := contextErr(ctx); err != nil {
+			return nil, err
+		}
 		scanned++
 		rec, status := parseJSONLLine(scanner.Text())
 		if status == "empty" {
@@ -342,6 +372,11 @@ func (t *Tools) JSONLFilter(raw json.RawMessage) (any, error) {
 }
 
 func (t *Tools) JSONLValidate(raw json.RawMessage) (any, error) {
+	return t.jsonLValidateContext(context.Background(), raw)
+}
+
+func (t *Tools) jsonLValidateContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a JSONLValidateArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -359,6 +394,9 @@ func (t *Tools) JSONLValidate(raw json.RawMessage) (any, error) {
 	lines, valid, malformed, empty := 0, 0, 0, 0
 	samples := []map[string]any{}
 	for scanner.Scan() {
+		if err := contextErr(ctx); err != nil {
+			return nil, err
+		}
 		lines++
 		_, status := parseJSONLLine(scanner.Text())
 		switch status {
@@ -379,12 +417,15 @@ func (t *Tools) JSONLValidate(raw json.RawMessage) (any, error) {
 	return map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "valid": malformed == 0, "lines": lines, "valid_records": valid, "empty_lines": empty, "malformed_lines": malformed, "error_samples": samples, "bytes_read": size}, nil
 }
 
-func readJSONLPage(r io.Reader, offset, limit int) (records []any, scanned, malformed, empty int, err error) {
+func readJSONLPageContext(ctx context.Context, r io.Reader, offset, limit int) (records []any, scanned, malformed, empty int, err error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	records = []any{}
 	validSeen := 0
 	for scanner.Scan() {
+		if err := contextErr(ctx); err != nil {
+			return nil, scanned, malformed, empty, err
+		}
 		scanned++
 		rec, status := parseJSONLLine(scanner.Text())
 		if status == "empty" {

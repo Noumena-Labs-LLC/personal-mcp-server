@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 )
 
-func (t *Tools) SearchTextContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.SearchText(raw)
+func (t *Tools) SearchTextContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.searchTextContext(normalizeContext(ctx), raw)
 }
 
-func (t *Tools) FindContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.Find(raw)
+func (t *Tools) FindContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.findContext(normalizeContext(ctx), raw)
 }
 
 func (t *Tools) JSONOutlineContext(_ context.Context, raw json.RawMessage) (any, error) {
@@ -29,38 +29,38 @@ func (t *Tools) JSONSliceContext(_ context.Context, raw json.RawMessage) (any, e
 	return t.JSONSlice(raw)
 }
 
-func (t *Tools) JSONSearchContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.JSONSearch(raw)
+func (t *Tools) JSONSearchContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.jsonSearchContext(normalizeContext(ctx), raw)
 }
 
 func (t *Tools) JSONValidateContext(_ context.Context, raw json.RawMessage) (any, error) {
 	return t.JSONValidate(raw)
 }
 
-func (t *Tools) JSONLInfoContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.JSONLInfo(raw)
+func (t *Tools) JSONLInfoContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.jsonLInfoContext(normalizeContext(ctx), raw)
 }
 
-func (t *Tools) JSONLReadContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.JSONLRead(raw)
+func (t *Tools) JSONLReadContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.jsonLReadContext(normalizeContext(ctx), raw)
 }
 
-func (t *Tools) JSONLTailContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.JSONLTail(raw)
+func (t *Tools) JSONLTailContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.jsonLTailContext(normalizeContext(ctx), raw)
 }
 
-func (t *Tools) JSONLFilterContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.JSONLFilter(raw)
+func (t *Tools) JSONLFilterContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.jsonLFilterContext(normalizeContext(ctx), raw)
 }
 
-func (t *Tools) JSONLValidateContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.JSONLValidate(raw)
+func (t *Tools) JSONLValidateContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.jsonLValidateContext(normalizeContext(ctx), raw)
 }
 
-func (t *Tools) MarkdownOutlineContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.MarkdownOutline(raw)
+func (t *Tools) MarkdownOutlineContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.markdownOutlineContext(normalizeContext(ctx), raw)
 }
 
-func (t *Tools) MarkdownReadSectionContext(_ context.Context, raw json.RawMessage) (any, error) {
-	return t.MarkdownReadSection(raw)
+func (t *Tools) MarkdownReadSectionContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	return t.markdownReadSectionContext(normalizeContext(ctx), raw)
 }

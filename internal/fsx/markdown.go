@@ -1,6 +1,7 @@
 package fsx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -20,6 +21,10 @@ func ParseMarkdownSections(content string) []MarkdownSection {
 	return markdownSections(content)
 }
 
+func ParseMarkdownSectionsContext(ctx context.Context, content string) ([]MarkdownSection, error) {
+	return markdownSectionsContext(ctx, content)
+}
+
 func FindMarkdownSection(sections []MarkdownSection, selector string) (MarkdownSection, error) {
 	return findMarkdownSection(sections, selector)
 }
@@ -37,13 +42,27 @@ type markdownHeading struct {
 var atxHeadingRE = regexp.MustCompile(`^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$`)
 
 func markdownSections(content string) []MarkdownSection {
+	sections, _ := markdownSectionsContext(context.Background(), content)
+	return sections
+}
+
+func markdownSectionsContext(ctx context.Context, content string) ([]MarkdownSection, error) {
 	lines := splitLinesKeepEnd(content)
-	headings := markdownHeadings(lines)
+	headings, err := markdownHeadingsContext(ctx, lines)
+	if err != nil {
+		return nil, err
+	}
 	sections := make([]MarkdownSection, 0, len(headings))
 	seenIDs := map[string]int{}
 	for i, h := range headings {
+		if err := contextErr(ctx); err != nil {
+			return nil, err
+		}
 		end := len(lines)
 		for j := i + 1; j < len(headings); j++ {
+			if err := contextErr(ctx); err != nil {
+				return nil, err
+			}
 			if headings[j].Level <= h.Level {
 				end = headings[j].Line - 1
 				break
@@ -51,14 +70,17 @@ func markdownSections(content string) []MarkdownSection {
 		}
 		sections = append(sections, MarkdownSection{ID: uniqueSlug(h.Title, seenIDs), Title: h.Title, Level: h.Level, LineStart: h.Line, LineEnd: end})
 	}
-	return sections
+	return sections, nil
 }
 
-func markdownHeadings(lines []string) []markdownHeading {
+func markdownHeadingsContext(ctx context.Context, lines []string) ([]markdownHeading, error) {
 	headings := []markdownHeading{}
 	inFence := false
 	fenceMarker := ""
 	for i, line := range lines {
+		if err := contextErr(ctx); err != nil {
+			return nil, err
+		}
 		trimmedLeft := strings.TrimLeft(line, " \t")
 		if strings.HasPrefix(trimmedLeft, "```") || strings.HasPrefix(trimmedLeft, "~~~") {
 			marker := trimmedLeft[:3]
@@ -84,7 +106,7 @@ func markdownHeadings(lines []string) []markdownHeading {
 		}
 		headings = append(headings, markdownHeading{Title: title, Level: len(m[1]), Line: i + 1})
 	}
-	return headings
+	return headings, nil
 }
 
 func findMarkdownSection(sections []MarkdownSection, selector string) (MarkdownSection, error) {

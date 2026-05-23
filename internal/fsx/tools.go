@@ -248,6 +248,11 @@ type SearchArgs struct {
 }
 
 func (t *Tools) SearchText(raw json.RawMessage) (any, error) {
+	return t.searchTextContext(context.Background(), raw)
+}
+
+func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a SearchArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -294,6 +299,9 @@ func (t *Tools) SearchText(raw json.RawMessage) (any, error) {
 	skippedLarge := []map[string]any{}
 	skippedLargeCount := 0
 	err = filepath.WalkDir(base, func(path string, d os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if len(matches) >= a.MaxResults {
 			return filepath.SkipAll
 		}
@@ -333,6 +341,7 @@ func (t *Tools) SearchText(raw json.RawMessage) (any, error) {
 		if err != nil {
 			return err
 		}
+		defer func() { _ = f.Close() }()
 		reader := bufio.NewReader(f)
 		lineNo := 0
 		stopWalk := false
@@ -340,6 +349,9 @@ func (t *Tools) SearchText(raw json.RawMessage) (any, error) {
 		var pending []int
 		matchesInFile := 0
 		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			line, err := reader.ReadString('\n')
 			if err != nil && err != io.EOF {
 				break
@@ -618,6 +630,11 @@ type FindArgs struct {
 }
 
 func (t *Tools) Find(raw json.RawMessage) (any, error) {
+	return t.findContext(context.Background(), raw)
+}
+
+func (t *Tools) findContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a FindArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -648,6 +665,9 @@ func (t *Tools) Find(raw json.RawMessage) (any, error) {
 	seenResults := 0
 	baseDepth := strings.Count(filepath.ToSlash(filepath.Clean(base)), "/")
 	err = filepath.WalkDir(base, func(path string, d os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -1481,11 +1501,16 @@ type MarkdownOutlineArgs struct {
 }
 
 func (t *Tools) MarkdownOutline(raw json.RawMessage) (any, error) {
+	return t.markdownOutlineContext(context.Background(), raw)
+}
+
+func (t *Tools) markdownOutlineContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a MarkdownOutlineArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
 	}
-	content, displayPath, sections, err := t.readMarkdownForTool(a.Path, a.Cwd, a.PathMode, "md_outline")
+	_, displayPath, sections, err := t.readMarkdownForToolContext(ctx, a.Path, a.Cwd, a.PathMode, "md_outline")
 	if err != nil {
 		return nil, err
 	}
@@ -1497,7 +1522,7 @@ func (t *Tools) MarkdownOutline(raw json.RawMessage) (any, error) {
 	if truncated {
 		sections = sections[:a.MaxSections]
 	}
-	return map[string]any{"path": displayPath, "cwd": a.Cwd, "sections": sections, "section_count": len(markdownSections(content)), "truncated": truncated}, nil
+	return map[string]any{"path": displayPath, "cwd": a.Cwd, "sections": sections, "section_count": count, "truncated": truncated}, nil
 }
 
 type MarkdownReadSectionArgs struct {
@@ -1508,11 +1533,16 @@ type MarkdownReadSectionArgs struct {
 }
 
 func (t *Tools) MarkdownReadSection(raw json.RawMessage) (any, error) {
+	return t.markdownReadSectionContext(context.Background(), raw)
+}
+
+func (t *Tools) markdownReadSectionContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	ctx = normalizeContext(ctx)
 	var a MarkdownReadSectionArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
 	}
-	content, displayPath, sections, err := t.readMarkdownForTool(a.Path, a.Cwd, a.PathMode, "md_read_section")
+	content, displayPath, sections, err := t.readMarkdownForToolContext(ctx, a.Path, a.Cwd, a.PathMode, "md_read_section")
 	if err != nil {
 		return nil, err
 	}
@@ -1777,7 +1807,7 @@ func (t *Tools) markdownInsertSection(a MarkdownInsertSectionArgs) (any, error) 
 	return t.writeMarkdownUpdate(p, displayPath, a.Cwd, original, strings.Join(updatedLines, ""), info.Mode(), a.DryRun, a.CreateBackup, map[string]any{"section": section, "inserted_title": a.Title})
 }
 
-func (t *Tools) readMarkdownForTool(path, cwd, pathMode, tool string) (content, displayPath string, sections []MarkdownSection, err error) {
+func (t *Tools) readMarkdownForToolContext(ctx context.Context, path, cwd, pathMode, tool string) (content, displayPath string, sections []MarkdownSection, err error) {
 	p, displayPath, err := t.resolvePath(path, cwd, pathMode)
 	if err != nil {
 		return "", "", nil, err
@@ -1785,7 +1815,14 @@ func (t *Tools) readMarkdownForTool(path, cwd, pathMode, tool string) (content, 
 	if err := t.enforceFilePolicy("read", displayPath, p, map[string]any{"tool": tool, "cwd": cwd}); err != nil {
 		return "", "", nil, err
 	}
-	content, _, sections, err = t.readMarkdownFile(p)
+	content, _, _, err = t.readMarkdownFile(p)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if err := contextErr(ctx); err != nil {
+		return "", "", nil, err
+	}
+	sections, err = markdownSectionsContext(ctx, content)
 	if err != nil {
 		return "", "", nil, err
 	}
