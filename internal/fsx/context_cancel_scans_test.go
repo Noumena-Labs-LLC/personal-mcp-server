@@ -118,3 +118,60 @@ func TestMarkdownOutlineContextCancelledExits(t *testing.T) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }
+
+func TestReadFileContextCancelledExits(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	cfg.Limits.MaxReadBytes = 1 << 20
+	tools := NewTools(cfg, nil)
+	var b strings.Builder
+	for i := 0; i < 200; i++ {
+		fmt.Fprintf(&b, "line %03d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := tools.ReadFileContext(ctx, json.RawMessage(`{"path":"big.txt","start_line":1,"max_lines":50}`))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestTailFileContextCancelledExits(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	cfg.Limits.MaxReadBytes = 1 << 20
+	tools := NewTools(cfg, nil)
+	if err := os.WriteFile(filepath.Join(root, "tail.txt"), []byte(strings.Repeat("tail\n", 500)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := tools.TailFileContext(ctx, json.RawMessage(`{"path":"tail.txt","lines":50}`))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestListDirContextCancelledExits(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	tools := NewTools(cfg, nil)
+	dir := filepath.Join(root, "dir")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("entry-%03d.txt", i)), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := tools.ListDirContext(ctx, json.RawMessage(`{"path":"dir","recursive":true,"max_entries":100}`))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}

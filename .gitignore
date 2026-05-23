@@ -46,3 +46,10 @@ configs/local.*
 
 # Claude / MCP local state
 .audit/
+
+# graphify
+graphify-out
+internals/graphify-out
+
+# planning
+plans/

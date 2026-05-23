@@ -3,9 +3,11 @@ package fsx
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +19,12 @@ func TestContextReadWrappersMatchBaseHandlers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "search.txt"), []byte("alpha\nbeta match\ngamma\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(strings.Repeat("line\n", 200)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tail.txt"), []byte(strings.Repeat("tail\n", 200)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "data.json"), []byte(`{"items":[1,2,3],"meta":{"name":"example"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -25,6 +33,14 @@ func TestContextReadWrappersMatchBaseHandlers(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("# Intro\n\n## Details\nbody\n"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		if err := os.WriteFile(filepath.Join(root, "dir", fmt.Sprintf("entry-%02d.txt", i)), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	cases := []struct {
@@ -48,6 +64,33 @@ func TestContextReadWrappersMatchBaseHandlers(t *testing.T) {
 			},
 			ctx: func() (any, error) {
 				return tools.FindContext(context.Background(), json.RawMessage(`{"path":".","name_globs":["*.json*"],"max_results":5}`))
+			},
+		},
+		{
+			name: "list_dir",
+			base: func() (any, error) {
+				return tools.ListDir(json.RawMessage(`{"path":"dir","max_entries":10}`))
+			},
+			ctx: func() (any, error) {
+				return tools.ListDirContext(context.Background(), json.RawMessage(`{"path":"dir","max_entries":10}`))
+			},
+		},
+		{
+			name: "read_file",
+			base: func() (any, error) {
+				return tools.ReadFile(json.RawMessage(`{"path":"big.txt","start_line":1,"max_lines":5}`))
+			},
+			ctx: func() (any, error) {
+				return tools.ReadFileContext(context.Background(), json.RawMessage(`{"path":"big.txt","start_line":1,"max_lines":5}`))
+			},
+		},
+		{
+			name: "tail_file",
+			base: func() (any, error) {
+				return tools.TailFile(json.RawMessage(`{"path":"tail.txt","lines":5}`))
+			},
+			ctx: func() (any, error) {
+				return tools.TailFileContext(context.Background(), json.RawMessage(`{"path":"tail.txt","lines":5}`))
 			},
 		},
 		{
