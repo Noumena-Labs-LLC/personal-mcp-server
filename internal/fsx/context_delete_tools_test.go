@@ -89,10 +89,7 @@ func TestMoveFileContextRequiresBothApprovals(t *testing.T) {
 	if !approver.Decide(first.ID, approval.DecisionApprove) {
 		t.Fatalf("failed to approve %s", first.ID)
 	}
-	second := waitForFileApprovalRequest(t, approver)
-	if second.Action != "create" {
-		t.Fatalf("expected create approval second, got %#v", second)
-	}
+	second := waitForFileApprovalActionAfter(t, approver, "create", first.ID)
 	if !approver.Decide(second.ID, approval.DecisionApprove) {
 		t.Fatalf("failed to approve %s", second.ID)
 	}
@@ -115,4 +112,19 @@ func TestMoveFileContextRequiresBothApprovals(t *testing.T) {
 	if got := string(b); !strings.Contains(got, "move me") {
 		t.Fatalf("unexpected moved content %q", got)
 	}
+}
+
+func waitForFileApprovalActionAfter(t *testing.T, approver *approval.Manager, action, previousID string) approval.Request {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, req := range approver.List() {
+			if req.ID != previousID && req.Action == action {
+				return req
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("approval request with action %q did not appear", action)
+	return approval.Request{}
 }
