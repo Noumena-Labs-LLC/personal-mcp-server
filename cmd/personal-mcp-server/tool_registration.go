@@ -217,7 +217,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "fs_search_text", Description: cfg.ToolDescription("fs_search_text", "Search text files inside configured roots. Plain substring search by default, regex optional, with result/file-size limits and offset pagination."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"query"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "query": map[string]any{"type": "string"}, "regex": map[string]any{"type": "boolean"}, "case_sensitive": map[string]any{"type": "boolean"}, "max_results": map[string]any{"type": "integer", "minimum": 1}, "offset": map[string]any{"type": "integer", "minimum": 0}, "include_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "exclude_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "context_before": map[string]any{"type": "integer", "minimum": 0}, "context_after": map[string]any{"type": "integer", "minimum": 0}, "max_matches_per_file": map[string]any{"type": "integer", "minimum": 1}},
-		}, Handler: ft.SearchText})
+		}, Handler: ft.SearchText, ContextHandler: ft.SearchTextContext})
 	}
 	if cfg.Tools.Find.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_find", Description: cfg.ToolDescription("fs_find", "Find files and directories inside configured roots using Go-native glob filtering with offset pagination. Use this instead of shell find."), InputSchema: map[string]any{
@@ -227,7 +227,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 				"name_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "path_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "exclude_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				"max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}, "offset": map[string]any{"type": "integer", "minimum": 0}, "max_depth": map[string]any{"type": "integer", "minimum": 1}, "min_size_bytes": map[string]any{"type": "integer", "minimum": 0}, "max_size_bytes": map[string]any{"type": "integer", "minimum": 0},
 			},
-		}, Handler: ft.Find})
+		}, Handler: ft.Find, ContextHandler: ft.FindContext})
 	}
 	if cfg.Tools.Tree.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_tree", Description: cfg.ToolDescription("fs_tree", "Return a compact bounded directory tree inside configured roots. Use this to orient within a repo before broad reads."), InputSchema: map[string]any{
@@ -308,13 +308,13 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "md_outline", Description: cfg.ToolDescription("md_outline", "Return a section outline for a Markdown file without reading the full document into the model. Ignores headings inside fenced code blocks."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "max_sections": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}},
-		}, Handler: ft.MarkdownOutline})
+		}, Handler: ft.MarkdownOutline, ContextHandler: ft.MarkdownOutlineContext})
 	}
 	if cfg.Tools.MarkdownReadSection.Enabled {
 		s.Register(mcphttp.Tool{Name: "md_read_section", Description: cfg.ToolDescription("md_read_section", "Read one Markdown section by heading id or title, including nested subsections, instead of reading the whole file."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path", "section"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "section": map[string]any{"type": "string"}},
-		}, Handler: ft.MarkdownReadSection})
+		}, Handler: ft.MarkdownReadSection, ContextHandler: ft.MarkdownReadSectionContext})
 	}
 	if cfg.Tools.MarkdownReplaceSection.Enabled {
 		s.Register(mcphttp.Tool{Name: "md_replace_section", Description: cfg.ToolDescription("md_replace_section", "Replace one Markdown section body by heading id or title. By default preserves the heading line; set include_heading=true to replace the whole section."), InputSchema: map[string]any{
@@ -351,61 +351,61 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "json_outline", Description: cfg.ToolDescription("json_outline", "Return a compact read-only structural outline for a JSON file. Supports object, array, string, number, boolean, and null roots; use pointer, max_depth, and max_children to navigate without dumping the file."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "pointer": map[string]any{"type": "string"}, "max_depth": map[string]any{"type": "integer", "minimum": 1, "maximum": 10}, "max_children": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}},
-		}, Handler: ft.JSONOutline})
+		}, Handler: ft.JSONOutline, ContextHandler: ft.JSONOutlineContext})
 	}
 	if cfg.Tools.JSONKeys.Enabled {
 		s.Register(mcphttp.Tool{Name: "json_keys", Description: cfg.ToolDescription("json_keys", "List object keys or array index windows at one JSON Pointer without returning child values."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "pointer": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}},
-		}, Handler: ft.JSONKeys})
+		}, Handler: ft.JSONKeys, ContextHandler: ft.JSONKeysContext})
 	}
 	if cfg.Tools.JSONGet.Enabled {
-		s.Register(mcphttp.Tool{Name: "json_get", Description: cfg.ToolDescription("json_get", "Return one targeted JSON value by RFC 6901 JSON Pointer. Empty pointer returns the root value, regardless of root type."), InputSchema: map[string]any{"type": "object", "required": []string{"path"}, "additionalProperties": false, "properties": jsonPointerProps}, Handler: ft.JSONGet})
+		s.Register(mcphttp.Tool{Name: "json_get", Description: cfg.ToolDescription("json_get", "Return one targeted JSON value by RFC 6901 JSON Pointer. Empty pointer returns the root value, regardless of root type."), InputSchema: map[string]any{"type": "object", "required": []string{"path"}, "additionalProperties": false, "properties": jsonPointerProps}, Handler: ft.JSONGet, ContextHandler: ft.JSONGetContext})
 	}
 	if cfg.Tools.JSONSlice.Enabled {
 		s.Register(mcphttp.Tool{Name: "json_slice", Description: cfg.ToolDescription("json_slice", "Return a bounded page of array items at one JSON Pointer."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "pointer": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}},
-		}, Handler: ft.JSONSlice})
+		}, Handler: ft.JSONSlice, ContextHandler: ft.JSONSliceContext})
 	}
 	if cfg.Tools.JSONSearch.Enabled {
 		s.Register(mcphttp.Tool{Name: "json_search", Description: cfg.ToolDescription("json_search", "Search JSON keys and scalar values and return matching JSON Pointers with short previews."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path", "query"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "query": map[string]any{"type": "string"}, "case_sensitive": map[string]any{"type": "boolean"}, "search_keys": map[string]any{"type": "boolean"}, "search_values": map[string]any{"type": "boolean"}, "type_filter": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"object", "array", "string", "number", "boolean", "null"}}}, "pointer_prefix": map[string]any{"type": "string"}, "limit": map[string]any{"type": "integer", "minimum": 1}},
-		}, Handler: ft.JSONSearch})
+		}, Handler: ft.JSONSearch, ContextHandler: ft.JSONSearchContext})
 	}
 	if cfg.Tools.JSONValidate.Enabled {
-		s.Register(mcphttp.Tool{Name: "json_validate", Description: cfg.ToolDescription("json_validate", "Validate a JSON file and report root type without returning the document."), InputSchema: map[string]any{"type": "object", "required": []string{"path"}, "additionalProperties": false, "properties": jsonPointerProps}, Handler: ft.JSONValidate})
+		s.Register(mcphttp.Tool{Name: "json_validate", Description: cfg.ToolDescription("json_validate", "Validate a JSON file and report root type without returning the document."), InputSchema: map[string]any{"type": "object", "required": []string{"path"}, "additionalProperties": false, "properties": jsonPointerProps}, Handler: ft.JSONValidate, ContextHandler: ft.JSONValidateContext})
 	}
 	if cfg.Tools.JSONLInfo.Enabled {
 		s.Register(mcphttp.Tool{Name: "jsonl_info", Description: cfg.ToolDescription("jsonl_info", "Sample a JSONL file to discover top-level fields and observed types without dumping records."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "sample": map[string]any{"type": "integer", "minimum": 1, "maximum": 10000}, "max_fields": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}},
-		}, Handler: ft.JSONLInfo})
+		}, Handler: ft.JSONLInfo, ContextHandler: ft.JSONLInfoContext})
 	}
 	if cfg.Tools.JSONLRead.Enabled {
 		s.Register(mcphttp.Tool{Name: "jsonl_read", Description: cfg.ToolDescription("jsonl_read", "Read a bounded page of valid JSONL records by logical record offset."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}},
-		}, Handler: ft.JSONLRead})
+		}, Handler: ft.JSONLRead, ContextHandler: ft.JSONLReadContext})
 	}
 	if cfg.Tools.JSONLTail.Enabled {
 		s.Register(mcphttp.Tool{Name: "jsonl_tail", Description: cfg.ToolDescription("jsonl_tail", "Return the latest valid JSONL records with counts for empty and malformed lines."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "records": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}},
-		}, Handler: ft.JSONLTail})
+		}, Handler: ft.JSONLTail, ContextHandler: ft.JSONLTailContext})
 	}
 	if cfg.Tools.JSONLFilter.Enabled {
 		s.Register(mcphttp.Tool{Name: "jsonl_filter", Description: cfg.ToolDescription("jsonl_filter", "Filter JSONL records by top-level exact fields, string contains, exists/missing, and RFC3339 timestamp ranges."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "where": map[string]any{"type": "object"}, "contains": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}, "exists": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "missing": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "numeric_gte": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "number"}}, "numeric_lte": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "number"}}, "timestamp_field": map[string]any{"type": "string"}, "ts_gte": map[string]any{"type": "string"}, "ts_lte": map[string]any{"type": "string"}, "limit": map[string]any{"type": "integer", "minimum": 1}, "reverse": map[string]any{"type": "boolean"}},
-		}, Handler: ft.JSONLFilter})
+		}, Handler: ft.JSONLFilter, ContextHandler: ft.JSONLFilterContext})
 	}
 	if cfg.Tools.JSONLValidate.Enabled {
 		s.Register(mcphttp.Tool{Name: "jsonl_validate", Description: cfg.ToolDescription("jsonl_validate", "Validate JSONL lines and count valid, empty, and malformed records."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "limit_errors": map[string]any{"type": "integer", "minimum": 1, "maximum": 50}},
-		}, Handler: ft.JSONLValidate})
+		}, Handler: ft.JSONLValidate, ContextHandler: ft.JSONLValidateContext})
 	}
 	if cfg.Tools.FeedbackSubmit.Enabled && cfg.Feedback.Enabled {
 		s.Register(mcphttp.Tool{Name: "feedback_submit", Description: cfg.ToolDescription("feedback_submit", "Submit concise local feedback about tool gaps, confusing schemas, docs gaps, safety-limit friction, or feature requests. Stored locally as JSONL; do not include secrets, credentials, large file contents, or private document excerpts."), InputSchema: map[string]any{
