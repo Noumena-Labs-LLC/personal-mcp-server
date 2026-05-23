@@ -95,6 +95,41 @@ func TestManagerContextCancellation(t *testing.T) {
 	}
 }
 
+func TestManagerTimeoutDoesNotWaitForLogging(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mgr := NewManagerWithDefault(5*time.Millisecond, DecisionDeny)
+	mgr.printf = func(_ string, _ ...any) (int, error) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		return 0, nil
+	}
+	start := time.Now()
+	decision, err := mgr.Request(context.Background(), Request{Summary: "blocked logging"})
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got decision=%q err=%v", decision, err)
+	}
+	if decision != DecisionDeny {
+		t.Fatalf("decision = %q, want %q", decision, DecisionDeny)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("timeout path took too long: %s", elapsed)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("approval logging hook did not start")
+	}
+	close(release)
+}
+
 func TestApprovalHandler(t *testing.T) {
 	mgr := NewManager(2 * time.Second)
 	server := httptest.NewServer(mgr.Handler())

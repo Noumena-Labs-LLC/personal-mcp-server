@@ -36,6 +36,7 @@ type Manager struct {
 	pending          map[string]*pending
 	timeout          time.Duration
 	defaultOnTimeout string
+	printf           func(string, ...any) (int, error)
 }
 
 func NewManager(timeout time.Duration) *Manager {
@@ -49,7 +50,7 @@ func NewManagerWithDefault(timeout time.Duration, defaultOnTimeout string) *Mana
 	if defaultOnTimeout != DecisionApprove {
 		defaultOnTimeout = DecisionDeny
 	}
-	return &Manager{pending: map[string]*pending{}, timeout: timeout, defaultOnTimeout: defaultOnTimeout}
+	return &Manager{pending: map[string]*pending{}, timeout: timeout, defaultOnTimeout: defaultOnTimeout, printf: fmt.Printf}
 }
 
 func (m *Manager) Request(ctx context.Context, req Request) (string, error) {
@@ -62,9 +63,14 @@ func (m *Manager) Request(ctx context.Context, req Request) (string, error) {
 	m.mu.Unlock()
 	defer m.remove(req.ID)
 
-	fmt.Printf("approval required: id=%s kind=%s action=%s summary=%s\n", req.ID, req.Kind, req.Action, req.Summary)
 	timer := time.NewTimer(m.timeout)
 	defer timer.Stop()
+	if m.printf == nil {
+		m.printf = fmt.Printf
+	}
+	go func(printf func(string, ...any) (int, error)) {
+		_, _ = printf("approval required: id=%s kind=%s action=%s summary=%s\n", req.ID, req.Kind, req.Action, req.Summary)
+	}(m.printf)
 	select {
 	case decision := <-p.ch:
 		if decision == DecisionApprove {

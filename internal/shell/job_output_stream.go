@@ -4,7 +4,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+var jobOutputCloseTimeout = 100 * time.Millisecond
 
 type jobOutputLimits struct {
 	MaxLines     int
@@ -37,8 +40,7 @@ type outputTailResult struct {
 }
 
 type jobOutputMessage struct {
-	data      []byte
-	closeDone chan struct{}
+	data []byte
 }
 
 type jobOutputStream struct {
@@ -47,6 +49,7 @@ type jobOutputStream struct {
 	dropped  atomic.Uint64
 	closed   atomic.Bool
 	snapshot atomic.Value // outputSnapshot
+	done     chan struct{}
 	closeMu  sync.Mutex
 }
 
@@ -55,6 +58,7 @@ func newJobOutputStream(limits jobOutputLimits) *jobOutputStream {
 	s := &jobOutputStream{
 		ch:     make(chan jobOutputMessage, limits.ChannelSize),
 		limits: limits,
+		done:   make(chan struct{}),
 	}
 	s.snapshot.Store(outputSnapshot{})
 	go s.run()
@@ -78,7 +82,12 @@ func normalizeJobOutputLimits(limits jobOutputLimits) jobOutputLimits {
 }
 
 func (s *jobOutputStream) Write(p []byte) (int, error) {
-	if len(p) == 0 || s == nil || s.closed.Load() {
+	if len(p) == 0 || s == nil {
+		return len(p), nil
+	}
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	if s.closed.Load() {
 		return len(p), nil
 	}
 	chunk := append([]byte(nil), p...)
@@ -95,13 +104,19 @@ func (s *jobOutputStream) CloseAndFlush() {
 		return
 	}
 	s.closeMu.Lock()
-	defer s.closeMu.Unlock()
 	if s.closed.Swap(true) {
+		s.closeMu.Unlock()
 		return
 	}
-	done := make(chan struct{})
-	s.ch <- jobOutputMessage{closeDone: done}
-	<-done
+	close(s.ch)
+	s.closeMu.Unlock()
+
+	timer := time.NewTimer(jobOutputCloseTimeout)
+	defer timer.Stop()
+	select {
+	case <-s.done:
+	case <-timer.C:
+	}
 }
 
 func (s *jobOutputStream) Tail(tailLines int) outputTailResult {
@@ -116,23 +131,20 @@ func (s *jobOutputStream) Tail(tailLines int) outputTailResult {
 }
 
 func (s *jobOutputStream) run() {
+	defer close(s.done)
 	ring := newOutputLineRing(s.limits.MaxLines)
 	partial := make([]byte, 0)
 	partialShort := false
 	for msg := range s.ch {
-		if msg.closeDone != nil {
-			if len(partial) > 0 || partialShort {
-				ring.add(outputLine{Text: string(partial), ShortRead: partialShort})
-				partial = partial[:0]
-				partialShort = false
-			}
-			s.publish(ring, partial, partialShort)
-			close(msg.closeDone)
-			return
-		}
 		partial, partialShort = s.processChunk(ring, partial, partialShort, msg.data)
 		s.publish(ring, partial, partialShort)
 	}
+	if len(partial) > 0 || partialShort {
+		ring.add(outputLine{Text: string(partial), ShortRead: partialShort})
+		partial = partial[:0]
+		partialShort = false
+	}
+	s.publish(ring, partial, partialShort)
 }
 
 func (s *jobOutputStream) processChunk(ring *outputLineRing, partial []byte, partialShort bool, chunk []byte) ([]byte, bool) {
