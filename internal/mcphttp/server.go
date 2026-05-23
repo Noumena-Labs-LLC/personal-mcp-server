@@ -18,8 +18,10 @@ import (
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
 )
 
-type ToolFunc func(json.RawMessage) (any, error)
-type ToolContextFunc func(context.Context, json.RawMessage) (any, error)
+type (
+	ToolFunc        func(json.RawMessage) (any, error)
+	ToolContextFunc func(context.Context, json.RawMessage) (any, error)
+)
 
 type Tool struct {
 	Name           string
