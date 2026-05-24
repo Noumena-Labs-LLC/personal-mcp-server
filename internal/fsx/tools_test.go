@@ -753,6 +753,32 @@ func TestMarkdownReplaceSectionHeadingAndAppendSubsection(t *testing.T) {
 	}
 }
 
+func TestMarkdownReplaceSectionIncludeHeadingRequiresMatchingHeading(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "README.md")
+	if err := os.WriteFile(path, []byte("# Title\n\n## Install\nold body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tools := NewTools(testConfig(root), nil)
+
+	if _, err := tools.MarkdownReplaceSection(json.RawMessage(`{"path":"README.md","section":"install","include_heading":true,"content":"new body\n"}`)); err == nil || !strings.Contains(err.Error(), "include_heading=true requires content to start with the existing heading line") {
+		t.Fatalf("expected missing-heading guidance, got %v", err)
+	}
+	if _, err := tools.MarkdownReplaceSection(json.RawMessage(`{"path":"README.md","section":"install","include_heading":true,"content":"## Setup\nnew body\n"}`)); err == nil || !strings.Contains(err.Error(), "use md_replace_section_heading to rename or relevel headings") {
+		t.Fatalf("expected heading-rename guidance, got %v", err)
+	}
+	if _, err := tools.MarkdownReplaceSection(json.RawMessage(`{"path":"README.md","section":"install","include_heading":true,"content":"## Install\nnew body\n"}`)); err != nil {
+		t.Fatalf("expected matching heading replacement to succeed, got %v", err)
+	}
+	b, err := os.ReadFile(path) //nolint:gosec // test reads a file created in t.TempDir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b); !strings.Contains(got, "## Install\nnew body\n") {
+		t.Fatalf("expected updated install section, got %q", got)
+	}
+}
+
 func TestMarkdownParserDuplicateHeadingsAndFencedCode(t *testing.T) {
 	content := "# Title\n\n```\n## Not a heading\n```\n\n## Repeat\nfirst\n\n## Repeat\nsecond\n"
 	sections := ParseMarkdownSections(content)

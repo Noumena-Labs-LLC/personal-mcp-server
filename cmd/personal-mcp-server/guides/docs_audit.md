@@ -18,7 +18,7 @@ The server remains localhost-only, bearer-token protected, Host/Origin validated
 
 ## Documentation posture
 
-LLM-facing guidance is available through guide tools. Prefer `server_info`, `tool_catalog_categories`, `tool_catalog_category`, `policy_describe`, and `guide_list` first, then `guide_read` for specific setup, project-config, tool, logging, troubleshooting, quality, release, and audit sections. Check catalog `enabled` fields and `policy_describe.cwd.disabled_tools` before using feature-gated tools.
+LLM-facing guidance is available through guide tools. Prefer `tool_catalog_batch`, `policy_describe`, and `guide_list` first, then `tool_catalog_category` only when narrower discovery is needed and `guide_read` for specific setup, project-config, tool, logging, troubleshooting, quality, release, and audit sections. Check catalog `enabled` fields and `policy_describe.cwd.disabled_tools` before using feature-gated tools.
 
 ## Platform coverage
 

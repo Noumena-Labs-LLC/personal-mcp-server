@@ -2,10 +2,11 @@
 
 Prefer discovery before action:
 
-- `server_info`
+- `tool_catalog_batch`
+- `tool_catalog_batch` can batch category discovery and optional startup context (`server_info`, `policy`, `guides`), and with no arguments returns the recommended startup bundle
 - `tool_catalog_categories`
 - `tool_catalog_category`
-- `tool_catalog_batch` can batch category discovery and optional startup context (`server_info`, `policy`, `guides`)
+- `server_info`
 - `tool_catalog_all`
 - `tool_catalog`
 - `policy_describe`
@@ -53,7 +54,7 @@ Use these read-only tools to navigate structured data without dumping whole file
 - `json_search`: search keys and scalar values, returning pointers and previews; use `type_filter` and `pointer_prefix` to narrow large documents.
 - `json_validate`: validate JSON and report the root type.
 
-For JSONL logs, prefer `jsonl_info` first to discover fields, then use `jsonl_filter`, `jsonl_tail`, or `jsonl_read` for bounded records. `jsonl_filter` supports exact matches, contains, exists/missing, nested dotted fields, numeric ranges, and timestamp ranges. Malformed and empty lines are counted instead of crashing the workflow. JSON and JSONL tools remain read-only in v0.5.8.
+For JSONL logs, prefer `jsonl_info` first to discover fields, then use `jsonl_filter`, `jsonl_tail`, or `jsonl_read` for bounded records. `jsonl_filter` supports exact matches, contains, exists/missing, nested dotted fields, numeric ranges, and timestamp ranges. Malformed and empty lines are counted instead of crashing the workflow. JSON and JSONL tools remain read-only in v0.5.9.
 
 
 ## Local feedback

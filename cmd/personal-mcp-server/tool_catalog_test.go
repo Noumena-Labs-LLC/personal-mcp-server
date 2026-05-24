@@ -88,3 +88,32 @@ func TestToolCatalogBatchReturnsSelectedCategoriesAndSummaries(t *testing.T) {
 		t.Fatalf("expected non-empty summaries, got %#v", summaries["count"])
 	}
 }
+
+func TestToolCatalogBatchDefaultsToStartupCategories(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.SearchText.Enabled = true
+	cfg.Tools.ReadFile.Enabled = true
+	cfg.Tools.ApplyPatch.Enabled = true
+	cfg.Tools.GitDiff.Enabled = true
+
+	batch, err := buildToolCatalogBatch(cfg, toolCatalogBatchArgs{})
+	if err != nil {
+		t.Fatalf("toolCatalogBatch returned error: %v", err)
+	}
+	if got, ok := batch["used_default_categories"].(bool); !ok || !got {
+		t.Fatalf("expected used_default_categories=true, got %#v", batch["used_default_categories"])
+	}
+	if got, ok := batch["count"].(int); !ok || got != len(defaultStartupToolCatalogCategories) {
+		t.Fatalf("expected startup category count %d, got %#v", len(defaultStartupToolCatalogCategories), batch["count"])
+	}
+	categories, ok := batch["categories"].([]map[string]any)
+	if !ok || len(categories) == 0 {
+		t.Fatalf("expected startup categories, got %#v", batch["categories"])
+	}
+	if categories[0]["category"] != "orientation" {
+		t.Fatalf("expected orientation first, got %#v", categories[0]["category"])
+	}
+	if _, ok := batch["summaries"].(map[string]any); !ok {
+		t.Fatalf("expected summaries for default startup batch, got %#v", batch["summaries"])
+	}
+}

@@ -5,7 +5,7 @@ This document records the current code quality, security, and documentation audi
 ## Current release audit
 
 Audit date: May 2026  
-Scope: local MCP server source tree, test workflow, service posture, prompt/tool guidance, logging guidance, progressive tool discovery, feature-gated tool documentation, low-friction filesystem mutation posture, slow-tool diagnostics, stress-test posture, and docs consistency before the v0.5.8 release candidate pass.
+Scope: local MCP server source tree, test workflow, service posture, prompt/tool guidance, logging guidance, progressive tool discovery, feature-gated tool documentation, low-friction filesystem mutation posture, slow-tool diagnostics, stress-test posture, and docs consistency before the v0.5.9 release candidate pass.
 
 ## Code quality audit
 

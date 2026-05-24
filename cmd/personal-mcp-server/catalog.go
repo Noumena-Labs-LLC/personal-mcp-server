@@ -25,6 +25,14 @@ type toolCatalogCategory struct {
 	Tools       []toolCatalogEntry `json:"tools"`
 }
 
+var defaultStartupToolCatalogCategories = []string{
+	"orientation",
+	"project_workflow",
+	"filesystem_read",
+	"filesystem_write",
+	"git_and_verification",
+}
+
 func toolCatalogAll(cfg *config.Config) map[string]any {
 	categories := []toolCatalogCategory{
 		{
@@ -149,7 +157,7 @@ func toolCatalogAll(cfg *config.Config) map[string]any {
 		},
 	}
 	return map[string]any{
-		"note":       "MCP tools/list is flat; prefer tool_catalog_categories then tool_catalog_category for progressive reveal, or tool_catalog_batch to preload multiple categories. tool_catalog_all returns the complete catalog.",
+		"note":       "MCP tools/list is flat; prefer tool_catalog_batch for a one-call startup bundle, tool_catalog_categories then tool_catalog_category for progressive reveal, or tool_catalog_all for the complete catalog.",
 		"categories": categories,
 	}
 }
@@ -218,8 +226,14 @@ func buildToolCatalogCategory(cfg *config.Config, args toolCatalogCategoryArgs) 
 }
 
 func buildToolCatalogBatch(cfg *config.Config, args toolCatalogBatchArgs) (map[string]any, error) {
-	selected := make([]map[string]any, 0, len(args.Categories))
-	for _, category := range args.Categories {
+	categories := append([]string{}, args.Categories...)
+	usedDefaultCategories := false
+	if len(categories) == 0 {
+		categories = append(categories, defaultStartupToolCatalogCategories...)
+		usedDefaultCategories = true
+	}
+	selected := make([]map[string]any, 0, len(categories))
+	for _, category := range categories {
 		item, err := buildToolCatalogCategory(cfg, toolCatalogCategoryArgs{
 			Category:        category,
 			IncludeDisabled: args.IncludeDisabled,
@@ -231,13 +245,15 @@ func buildToolCatalogBatch(cfg *config.Config, args toolCatalogBatchArgs) (map[s
 		selected = append(selected, item)
 	}
 	out := map[string]any{
-		"categories":        selected,
-		"count":             len(selected),
-		"include_disabled":  args.IncludeDisabled,
-		"query":             strings.TrimSpace(args.Query),
-		"include_summaries": args.IncludeSummaries,
+		"categories":              selected,
+		"count":                   len(selected),
+		"requested_count":         len(args.Categories),
+		"used_default_categories": usedDefaultCategories,
+		"include_disabled":        args.IncludeDisabled,
+		"query":                   strings.TrimSpace(args.Query),
+		"include_summaries":       args.IncludeSummaries,
 	}
-	if args.IncludeSummaries || len(args.Categories) == 0 {
+	if args.IncludeSummaries || usedDefaultCategories {
 		out["summaries"] = toolCatalogCategories(cfg)
 	}
 	return out, nil

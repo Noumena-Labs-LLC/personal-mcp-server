@@ -83,6 +83,13 @@ func TestIntegrationMCPHTTPFilesystemWorkflow(t *testing.T) {
 	assertContains(t, catalogBatchBody, "policy")
 	assertContains(t, catalogBatchBody, "guides")
 
+	defaultCatalogBatchBody := postIntegrationMCP(t, server.URL, rt.port, `{"jsonrpc":"2.0","id":316,"method":"tools/call","params":{"name":"tool_catalog_batch","arguments":{}}}`)
+	assertContains(t, defaultCatalogBatchBody, "used_default_categories")
+	assertContains(t, defaultCatalogBatchBody, "orientation")
+	assertContains(t, defaultCatalogBatchBody, "server_info")
+	assertContains(t, defaultCatalogBatchBody, "policy")
+	assertContains(t, defaultCatalogBatchBody, "guides")
+
 	catalogBody := postIntegrationMCP(t, server.URL, rt.port, `{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"tool_catalog","arguments":{}}}`)
 	assertContains(t, catalogBody, "filesystem_read")
 	assertContains(t, catalogBody, "cmd_run_named")

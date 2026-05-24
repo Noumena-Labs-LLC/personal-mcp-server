@@ -6,7 +6,7 @@ The server reloads TOML periodically. If a new config fails validation, the runn
 
 ## Recommended workflow
 
-1. Call `server_info`, then `tool_catalog_categories` and `tool_catalog_category` when the flat MCP tool list is hard to navigate.
+1. Start with `tool_catalog_batch`. Call it with startup context flags, or with no arguments to get the recommended startup bundle in one round-trip. Use `tool_catalog_categories` and `tool_catalog_category` only when you want narrower progressive discovery.
 2. Call `fs_list_roots` to learn the workspace boundary.
 3. Use `project_info`, `workflow_list`, and `cmd_list_named` with `cwd` before guessing repo commands.
 4. Use `fs_list_dir` or `fs_search_text` to find relevant files; use `fs_tree` and `fs_find` only when `server_info.features.native_find` is true.
@@ -18,7 +18,7 @@ The server reloads TOML periodically. If a new config fails validation, the runn
 
 ## Tool hierarchy
 
-MCP `tools/list` is a flat protocol response. personal-mcp-server keeps that flat list for compatibility and adds progressive read-only catalog tools for LLM navigation. Start with `tool_catalog_categories`, then call `tool_catalog_category` for one category; use `tool_catalog_all` only when a full dump is needed. `tool_catalog` remains a compatibility alias for the full catalog. Use these when deciding which tool family to use first. The categories are:
+MCP `tools/list` is a flat protocol response. personal-mcp-server keeps that flat list for compatibility and adds read-only catalog tools for LLM navigation. Prefer `tool_catalog_batch` for startup because it can return several categories plus optional `server_info`, `policy`, and guide context in one call. Use `tool_catalog_categories` and `tool_catalog_category` when you want narrower progressive reveal, and `tool_catalog_all` only when a full dump is needed. `tool_catalog` remains a compatibility alias for the full catalog. The categories are:
 
 - orientation and guidance
 - project workflow discovery and named commands
@@ -91,7 +91,7 @@ Use these tools for Markdown files instead of reading or editing entire large do
 
 - `md_outline` returns headings, stable section ids, and line ranges.
 - `md_read_section` reads one section by id or title.
-- `md_replace_section` replaces a section body by default, preserving the heading.
+- `md_replace_section` replaces a section body by default, preserving the heading. When `include_heading=true`, the replacement content must start with the existing heading line; use `md_replace_section_heading` for heading changes.
 - `md_replace_section_heading` renames or relevels a heading without replacing its body.
 - `md_insert_section` inserts a new section before or after an existing section.
 - `md_append_section` appends a new section to the end of a document.
@@ -512,7 +512,7 @@ When `cwd` points inside a trusted project, `cmd_run_named` first checks project
 
 ## tool_catalog_batch
 
-`tool_catalog_batch` returns multiple catalog categories in one call, with optional category summaries plus startup context such as `server_info`, `policy`, and `guides`. Use it when a client would otherwise issue several startup discovery calls just to preload the same tool groups.
+`tool_catalog_batch` returns multiple catalog categories in one call, with optional category summaries plus startup context such as `server_info`, `policy`, and `guides`. Use it when a client would otherwise issue several startup discovery calls just to preload the same tool groups. When `categories` is omitted, it returns the recommended startup bundle and, if no other flags are set, also includes summaries plus `server_info`, `policy`, and `guides`.
 
 ```json
 {
@@ -522,6 +522,12 @@ When `cwd` points inside a trusted project, `cmd_run_named` first checks project
   "include_policy": true,
   "include_guides": true
 }
+```
+
+Minimal startup call:
+
+```json
+{}
 ```
 
 ## fs_tree
