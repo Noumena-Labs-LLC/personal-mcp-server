@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -55,7 +54,7 @@ func testServiceSpec(t *testing.T, binary, configPath string) serviceres.Spec {
 }
 
 func TestApprovalClientDecideEscapesID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newLocalHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got, want := r.URL.EscapedPath(), "/approvals/approval-1%2Fneeds-escaping/approve"; got != want {
 			t.Fatalf("path = %q, want %q", got, want)
 		}
@@ -64,7 +63,6 @@ func TestApprovalClientDecideEscapesID(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer server.Close()
 
 	client := &approvalClient{baseURL: server.URL, token: "test-token", client: server.Client()}
 	if err := client.decide("approval-1/needs-escaping", "approve"); err != nil {

@@ -104,12 +104,14 @@ func TestRunArgvContextApprovalDenyStillFailsCommand(t *testing.T) {
 func waitForApprovalRequest(t *testing.T, approver *approval.Manager) approval.Request {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for time.Now().Before(deadline) {
 		pending := approver.List()
 		if len(pending) == 1 {
 			return pending[0]
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-ticker.C
 	}
 	t.Fatal("approval request did not appear")
 	return approval.Request{}

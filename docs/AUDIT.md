@@ -5,7 +5,7 @@ This document records the current code quality, security, and documentation audi
 ## Current release audit
 
 Audit date: May 2026  
-Scope: local MCP server source tree, test workflow, service posture, prompt/tool guidance, logging guidance, progressive tool discovery, feature-gated tool documentation, low-friction filesystem mutation posture, slow-tool diagnostics, and docs consistency before the v0.5.7 release candidate pass.
+Scope: local MCP server source tree, test workflow, service posture, prompt/tool guidance, logging guidance, progressive tool discovery, feature-gated tool documentation, low-friction filesystem mutation posture, slow-tool diagnostics, stress-test posture, and docs consistency before the v0.5.7 release candidate pass.
 
 ## Code quality audit
 
@@ -26,6 +26,8 @@ just ci
 - native smoke tests
 - govulncheck
 
+Stress testing is available separately through `just stress-test`. It is intentionally not part of the default CI gate because it is tuned for longer-running timeout and race discovery rather than the fast path.
+
 Integration and smoke tests are native Go tests. They create temporary roots, config files, audit logs, trust stores, and token state. They do not use the user's real `~/.personal-mcp-server/config` files.
 
 Recent code-quality cleanup:
@@ -39,6 +41,7 @@ Recent code-quality cleanup:
 - Project trust-store refreshes use metadata-aware caching to reduce repeated disk reads while still noticing external edits.
 - Markdown parsing, guide-section navigation, structured-data navigation, bulk deletion, config tools, diagnostics tools, and filesystem sandbox behavior have focused coverage.
 - Integration tests exercise tool discovery, guide access, policy/project/workflow discovery, auth, Host, Origin, and filesystem sandbox behavior.
+- Stress tests exercise repeated startup/shutdown, concurrent MCP traffic, background job churn, and persistent-shell contention to catch timeout and race regressions.
 
 Current follow-ups to watch:
 
@@ -47,6 +50,7 @@ Current follow-ups to watch:
 - Prefer structured tests for new tools before adding more feature scope.
 - Watch async audit/diagnostic logging behavior during shutdown and config reload; bounded queues should drain on close and avoid request-path file I/O.
 - Treat profiling as the next step before adding more speculative performance work.
+- Keep coverage improvement focused on the command package and remaining branch-heavy helpers; stress tests are for concurrency and timeout confidence, not for lifting statement coverage by themselves.
 
 ## Security audit
 
@@ -80,11 +84,13 @@ Current LLM navigation posture:
 - `guide_list` exposes guide/document outlines, and `guide_read` can return a full guide or a specific section.
 - MCP `tools/list` remains flat for protocol compatibility; `tool_catalog_categories`, `tool_catalog_category`, and `tool_catalog_all` provide progressive workflow discovery for LLMs that need grouped or complete catalog views. `tool_catalog` remains a compatibility alias for the full catalog.
 - Release packaging guidance is available through `docs/RELEASE.md` and the embedded `personal-mcp://docs/release` summary.
+- The repository now also documents a separate stress tier in `just stress-test`; it is intended for race and timeout discovery rather than regular CI.
 
 Docs checked in this pass:
 
 - README command examples should prefer `./bin/personal-mcp-server` for local builds and `personal-mcp-server` for installed/PATH usage.
 - Quality docs should state that `just ci` includes integration and smoke tests.
+- Quality docs should state that `just ci` includes integration and smoke tests, while stress remains a separate target.
 - LLM-facing guides should point agents toward `server_info`, `tool_catalog_categories`, `tool_catalog_category`, `guide_list`, `guide_read`, `project_info`, `workflow_list`, `cmd_list_named`, `policy_describe`, and `git_status` for orientation.
 - Service docs should state that macOS LaunchAgent operations have manual smoke coverage, Linux systemd user-service support is implemented but currently untested in release validation, and normal diagnostic logging belongs in `[server_logging]` rather than plist/unit overrides.
 - Release docs should state that source snapshots intentionally exclude git history and local/generated files, and that private development repos can publish public release-only artifacts.

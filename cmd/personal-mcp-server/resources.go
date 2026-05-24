@@ -280,7 +280,7 @@ func resourceReadTool(ft *fsx.Tools, cfg *config.Config) func(json.RawMessage) (
 			return map[string]any{"uri": a.URI, "mime_type": "application/json", "content": policy.Describe(cfg, ft.Sandbox.Roots, version)}, nil
 		case "guide", "docs":
 			path := strings.TrimPrefix(u.Path, "/")
-			if _, ok := guideResourceByPath(u.Host, path); !ok {
+			if !guideResourceByPath(u.Host, path) {
 				return nil, fmt.Errorf("unknown %s resource %q", u.Host, a.URI)
 			}
 			file, _ := guideByURI(a.URI)
@@ -383,17 +383,17 @@ func guideByURI(uri string) (string, bool) {
 	return "", false
 }
 
-func guideResourceByPath(host, path string) (guideResource, bool) {
+func guideResourceByPath(host, path string) bool {
 	uri := "personal-mcp://" + host + "/" + path
 	for _, r := range guideResources() {
 		if r.URI == uri {
-			return r, true
+			return true
 		}
 	}
 	for _, r := range docResources() {
 		if r.URI == uri {
-			return r, true
+			return true
 		}
 	}
-	return guideResource{}, false
+	return false
 }

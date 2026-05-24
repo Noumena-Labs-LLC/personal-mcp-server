@@ -34,6 +34,9 @@ integration-test:
 smoke-test:
     go test ./cmd/personal-mcp-server -run 'Smoke'
 
+stress-test:
+    go test -race -count=1 ./cmd/personal-mcp-server -run 'Stress' -timeout 10m
+
 
 coverage:
     go test ./... -cover
@@ -86,7 +89,7 @@ ci: lint-check test-race integration-test smoke-test govulncheck
 
 govulncheck:
     test -x {{GOVULNCHECK}} || just tools
-    {{GOVULNCHECK}} ./...
+    {{GOVULNCHECK}} -show verbose ./...
 
 build:
     mkdir -p bin
