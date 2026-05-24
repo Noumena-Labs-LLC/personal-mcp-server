@@ -51,6 +51,36 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 			slog.Debug("tool_catalog_category completed", "category", args.Category, "duration_ms", time.Since(start).Milliseconds(), "err", err)
 			return out, err
 		}})
+		s.Register(mcphttp.Tool{Name: "tool_catalog_batch", Description: "Return multiple tool catalog categories in one call, optionally with category summaries, to reduce startup discovery round-trips.", InputSchema: map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"categories":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"include_disabled":    map[string]any{"type": "boolean"},
+				"query":               map[string]any{"type": "string"},
+				"include_summaries":   map[string]any{"type": "boolean"},
+				"include_server_info": map[string]any{"type": "boolean"},
+				"include_policy":      map[string]any{"type": "boolean"},
+				"include_guides":      map[string]any{"type": "boolean"},
+			},
+		}, Handler: func(raw json.RawMessage) (any, error) {
+			var args toolCatalogBatchArgs
+			if err := json.Unmarshal(raw, &args); err != nil {
+				return nil, err
+			}
+			start := time.Now()
+			out, err := buildToolCatalogBatch(cfg, args)
+			if err == nil && args.IncludeServer {
+				out["server_info"] = serverInfo(cfg)
+			}
+			if err == nil && args.IncludePolicy {
+				out["policy"] = policy.Describe(cfg, ft.Sandbox.Roots, version)
+			}
+			if err == nil && args.IncludeGuides {
+				out["guides"] = guideCatalog()
+			}
+			slog.Debug("tool_catalog_batch completed", "categories", args.Categories, "duration_ms", time.Since(start).Milliseconds(), "err", err)
+			return out, err
+		}})
 	}
 	pathSchema := map[string]any{
 		"type":                 "object",
@@ -216,7 +246,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 	if cfg.Tools.SearchText.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_search_text", Description: cfg.ToolDescription("fs_search_text", "Search text files inside configured roots. Plain substring search by default, regex optional, with result/file-size limits and offset pagination."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"query"}, "additionalProperties": false,
-			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "query": map[string]any{"type": "string"}, "regex": map[string]any{"type": "boolean"}, "case_sensitive": map[string]any{"type": "boolean"}, "max_results": map[string]any{"type": "integer", "minimum": 1}, "offset": map[string]any{"type": "integer", "minimum": 0}, "include_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "exclude_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "context_before": map[string]any{"type": "integer", "minimum": 0}, "context_after": map[string]any{"type": "integer", "minimum": 0}, "max_matches_per_file": map[string]any{"type": "integer", "minimum": 1}},
+			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "query": map[string]any{"type": "string"}, "regex": map[string]any{"type": "boolean"}, "case_sensitive": map[string]any{"type": "boolean"}, "max_results": map[string]any{"type": "integer", "minimum": 1}, "max_file_size": map[string]any{"type": "integer", "minimum": 0}, "offset": map[string]any{"type": "integer", "minimum": 0}, "include_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "exclude_globs": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "context_before": map[string]any{"type": "integer", "minimum": 0}, "context_after": map[string]any{"type": "integer", "minimum": 0}, "max_matches_per_file": map[string]any{"type": "integer", "minimum": 1}},
 		}, Handler: ft.SearchText, ContextHandler: ft.SearchTextContext})
 	}
 	if cfg.Tools.Find.Enabled {
@@ -447,7 +477,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 			"type": "object", "required": []string{"name"}, "additionalProperties": false,
 			"properties": map[string]any{"name": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "extra_args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
 		}
-		s.Register(mcphttp.Tool{Name: "cmd_run_named", Description: cfg.ToolDescription("cmd_run_named", "Run one named command from global config or a trusted project .personal-mcp-server.toml. If cwd is supplied in the tool call it wins; otherwise a command-level cwd may be used. Default run_mode is direct argv; trusted project commands may opt into persistent_shell when globally enabled. Use cmd_list_named with cwd to discover commands, cwd, run_mode, shell, and extra_args rules. No raw user-provided shell strings or shell job control; use cmd_start_named for server-supervised background jobs."), InputSchema: namedCommandSchema, Handler: r.RunNamed, ContextHandler: r.RunNamedContext})
+		s.Register(mcphttp.Tool{Name: "cmd_run_named", Description: cfg.ToolDescription("cmd_run_named", "Run one named command from global config or a trusted project .personal-mcp-server.toml. If cwd is supplied in the tool call it wins; otherwise a command-level cwd may be used. Default run_mode is direct argv; trusted project commands may opt into persistent_shell when globally enabled. Use cmd_list_named with cwd to discover commands, cwd, run_mode, shell, and extra_args rules. Configured args may include {{extra_args}} to place validated extra_args before fixed trailing args for rg/grep-style commands. No raw user-provided shell strings or shell job control; use cmd_start_named for server-supervised background jobs."), InputSchema: namedCommandSchema, Handler: r.RunNamed, ContextHandler: r.RunNamedContext})
 		s.Register(mcphttp.Tool{Name: "cmd_start_named", Description: cfg.ToolDescription("cmd_start_named", "Start one named command as a server-supervised background job and return a job_id. Uses the same named-command cwd resolution, validation, and timeout policy as cmd_run_named."), InputSchema: namedCommandSchema, Handler: r.StartNamed})
 		jobIDSchema := map[string]any{
 			"type": "object", "required": []string{"job_id"}, "additionalProperties": false,

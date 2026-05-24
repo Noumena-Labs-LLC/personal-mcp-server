@@ -150,6 +150,9 @@ func TestJSONLAndPolicyHelperBranches(t *testing.T) {
 	if got := resultInt(t, readMap, "returned"); got != 2 {
 		t.Fatalf("JSONLRead returned = %d, want 2", got)
 	}
+	if counts := resultIntMap(t, readMap["ignored_counts"], "ignored_counts"); counts["empty"] != 1 || counts["malformed"] != 1 {
+		t.Fatalf("JSONLRead ignored_counts = %#v", counts)
+	}
 	records := mustAnySlice(t, readMap["records"], "records")
 	if len(records) != 2 {
 		t.Fatalf("JSONLRead records = %#v", records)
@@ -163,6 +166,9 @@ func TestJSONLAndPolicyHelperBranches(t *testing.T) {
 	if got := resultInt(t, tailMap, "records_returned"); got != 3 {
 		t.Fatalf("JSONLTail records_returned = %d, want 3", got)
 	}
+	if counts := resultIntMap(t, tailMap["ignored_counts"], "ignored_counts"); counts["empty"] != 1 || counts["malformed"] != 1 {
+		t.Fatalf("JSONLTail ignored_counts = %#v", counts)
+	}
 	tailRecords := mustAnySlice(t, tailMap["records"], "records")
 	if len(tailRecords) != 3 {
 		t.Fatalf("JSONLTail records = %#v", tailRecords)
@@ -175,6 +181,9 @@ func TestJSONLAndPolicyHelperBranches(t *testing.T) {
 	filteredMap := resultMap(t, filtered)
 	if got := resultInt(t, filteredMap, "returned"); got != 1 {
 		t.Fatalf("JSONLFilter returned = %d, want 1", got)
+	}
+	if counts := resultIntMap(t, filteredMap["ignored_counts"], "ignored_counts"); counts["empty"] != 1 || counts["malformed"] != 1 {
+		t.Fatalf("JSONLFilter ignored_counts = %#v", counts)
 	}
 
 	reversed, err := tools.JSONLFilter(json.RawMessage(`{"path":"records.jsonl","contains":{"name":"a"},"reverse":true,"limit":2}`))
@@ -355,5 +364,8 @@ func TestGitDiffAndTreeHelpers(t *testing.T) {
 	}
 	if strings.Contains(tree, ".hidden") || strings.Contains(tree, "skip.txt") {
 		t.Fatalf("Tree should omit hidden and excluded files: %q", tree)
+	}
+	if counts := resultIntMap(t, treeMap["ignored_counts"], "ignored_counts"); counts["hidden"] < 1 || counts["exclude_glob"] != 1 {
+		t.Fatalf("Tree ignored_counts = %#v", counts)
 	}
 }

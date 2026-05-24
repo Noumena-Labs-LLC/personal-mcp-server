@@ -185,6 +185,7 @@ func (t *Tools) ListDirContext(ctx context.Context, raw json.RawMessage) (any, e
 	}
 	entries := []entry{}
 	rootForRel := p
+	ignored := newIgnoredItems(20)
 	walk := func(path string, d os.DirEntry, walkErr error) error {
 		if err := contextErr(ctx); err != nil {
 			return err
@@ -200,6 +201,8 @@ func (t *Tools) ListDirContext(ctx context.Context, raw json.RawMessage) (any, e
 		}
 		name := d.Name()
 		if !a.IncludeHidden && strings.HasPrefix(name, ".") {
+			rel, _ := filepath.Rel(rootForRel, path)
+			ignored.add("hidden", map[string]any{"path": rel, "type": entryType(d)})
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -207,12 +210,16 @@ func (t *Tools) ListDirContext(ctx context.Context, raw json.RawMessage) (any, e
 		}
 		resolved, resolveErr := filepath.EvalSymlinks(path)
 		if resolveErr == nil && !t.Sandbox.InRoot(resolved) {
+			rel, _ := filepath.Rel(rootForRel, path)
+			ignored.add("outside_root", map[string]any{"path": rel, "type": entryType(d)})
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if t.Sandbox.IsDenied(path) {
+			rel, _ := filepath.Rel(rootForRel, path)
+			ignored.add("denied", map[string]any{"path": rel, "type": entryType(d)})
 			return nil
 		}
 		inf, err := d.Info()
@@ -236,7 +243,9 @@ func (t *Tools) ListDirContext(ctx context.Context, raw json.RawMessage) (any, e
 		return nil, err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-	return map[string]any{"entries": entries, "path": displayPath, "cwd": a.Cwd, "truncated": len(entries) >= a.MaxEntries}, nil
+	out := map[string]any{"entries": entries, "path": displayPath, "cwd": a.Cwd, "truncated": len(entries) >= a.MaxEntries}
+	ignored.export(out)
+	return out, nil
 }
 
 type SearchArgs struct {
@@ -247,6 +256,7 @@ type SearchArgs struct {
 	Regex             bool     `json:"regex"`
 	CaseSensitive     bool     `json:"case_sensitive"`
 	MaxResults        int      `json:"max_results"`
+	MaxFileSize       int64    `json:"max_file_size"`
 	IncludeGlobs      []string `json:"include_globs"`
 	ExcludeGlobs      []string `json:"exclude_globs"`
 	ContextBefore     int      `json:"context_before"`
@@ -271,8 +281,18 @@ func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any
 	if a.MaxResults <= 0 || a.MaxResults > t.Cfg.Limits.MaxSearchResults {
 		a.MaxResults = t.Cfg.Limits.MaxSearchResults
 	}
+	if a.MaxFileSize < 0 {
+		return nil, errors.New("max_file_size must be non-negative")
+	}
 	if a.Offset < 0 {
 		return nil, errors.New("offset must be non-negative")
+	}
+	maxFileSize := t.Cfg.Limits.MaxSearchFileBytes
+	if a.MaxFileSize > 0 {
+		if a.MaxFileSize > t.Cfg.Limits.MaxSearchFileBytes {
+			return nil, fmt.Errorf("max_file_size %d exceeds configured limits.max_search_file_bytes %d", a.MaxFileSize, t.Cfg.Limits.MaxSearchFileBytes)
+		}
+		maxFileSize = a.MaxFileSize
 	}
 	base, displayPath, err := t.resolvePath(a.Path, a.Cwd, a.PathMode)
 	if err != nil {
@@ -306,6 +326,7 @@ func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any
 	seenMatches := 0
 	skippedLarge := []map[string]any{}
 	skippedLargeCount := 0
+	ignored := newIgnoredItems(20)
 	err = filepath.WalkDir(base, func(path string, d os.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -318,31 +339,46 @@ func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any
 		}
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") && path != base {
+				rel, _ := filepath.Rel(base, path)
+				ignored.add("hidden", map[string]any{"path": rel, "type": "dir"})
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		resolved, resolveErr := filepath.EvalSymlinks(path)
 		if resolveErr == nil && !t.Sandbox.InRoot(resolved) {
+			rel, _ := filepath.Rel(base, path)
+			ignored.add("outside_root", map[string]any{"path": rel, "type": entryType(d)})
 			return nil
 		}
 		if t.Sandbox.IsDenied(path) {
+			rel, _ := filepath.Rel(base, path)
+			ignored.add("denied", map[string]any{"path": rel, "type": entryType(d)})
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
-		if info.Size() > t.Cfg.Limits.MaxSearchFileBytes {
+		if info.Size() > maxFileSize {
 			skippedLargeCount++
 			if len(skippedLarge) < 20 {
 				rel, _ := filepath.Rel(base, path)
-				skippedLarge = append(skippedLarge, map[string]any{"path": rel, "bytes": info.Size(), "limit": t.Cfg.Limits.MaxSearchFileBytes})
+				skippedLarge = append(skippedLarge, map[string]any{"path": rel, "bytes": info.Size(), "limit": maxFileSize})
 			}
+			rel, _ := filepath.Rel(base, path)
+			ignored.add("too_large", map[string]any{"path": rel, "bytes": info.Size(), "limit": maxFileSize, "type": entryType(d)})
 			return nil
 		}
 		rel, _ := filepath.Rel(base, path)
-		if !matchGlobSet(rel, a.IncludeGlobs, true) || matchGlobSet(rel, a.ExcludeGlobs, false) {
+		if !matchGlobSet(rel, a.IncludeGlobs, true) {
+			if len(a.IncludeGlobs) > 0 {
+				ignored.add("include_glob_miss", map[string]any{"path": rel, "type": entryType(d)})
+			}
+			return nil
+		}
+		if matchGlobSet(rel, a.ExcludeGlobs, false) {
+			ignored.add("exclude_glob", map[string]any{"path": rel, "type": entryType(d)})
 			return nil
 		}
 		f, err := os.Open(path) //nolint:gosec // path was resolved through the sandbox before walking.
@@ -356,6 +392,7 @@ func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any
 		before := make([]string, 0, maxInt(a.ContextBefore, 0))
 		var pending []int
 		matchesInFile := 0
+		binarySkipped := false
 		for {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -366,6 +403,7 @@ func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any
 			}
 			if line != "" {
 				if strings.ContainsRune(line, '\x00') {
+					binarySkipped = true
 					break
 				}
 				lineNo++
@@ -427,6 +465,9 @@ func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any
 		if closeErr := f.Close(); closeErr != nil {
 			return closeErr
 		}
+		if binarySkipped {
+			ignored.add("binary", map[string]any{"path": rel, "type": entryType(d)})
+		}
 		if stopWalk {
 			return filepath.SkipAll
 		}
@@ -437,7 +478,9 @@ func (t *Tools) searchTextContext(ctx context.Context, raw json.RawMessage) (any
 	if truncated {
 		nextOffset = a.Offset + len(matches)
 	}
-	return map[string]any{"matches": matches, "path": displayPath, "cwd": a.Cwd, "offset": a.Offset, "next_offset": nextOffset, "truncated": truncated, "skipped_too_large_count": skippedLargeCount, "skipped_too_large_samples": skippedLarge}, err
+	out := map[string]any{"matches": matches, "path": displayPath, "cwd": a.Cwd, "offset": a.Offset, "next_offset": nextOffset, "truncated": truncated, "applied_max_file_size": maxFileSize, "skipped_too_large_count": skippedLargeCount, "skipped_too_large_samples": skippedLarge}
+	ignored.export(out)
+	return out, err
 }
 
 type PatchEdit struct {
@@ -671,6 +714,7 @@ func (t *Tools) findContext(ctx context.Context, raw json.RawMessage) (any, erro
 	}
 	results := []result{}
 	seenResults := 0
+	ignored := newIgnoredItems(20)
 	baseDepth := strings.Count(filepath.ToSlash(filepath.Clean(base)), "/")
 	err = filepath.WalkDir(base, func(path string, d os.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
@@ -687,6 +731,8 @@ func (t *Tools) findContext(ctx context.Context, raw json.RawMessage) (any, erro
 		}
 		depth := strings.Count(filepath.ToSlash(filepath.Clean(path)), "/") - baseDepth
 		if a.MaxDepth > 0 && depth > a.MaxDepth {
+			rel, _ := filepath.Rel(base, path)
+			ignored.add("max_depth", map[string]any{"path": filepath.ToSlash(rel), "type": entryType(d)})
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -694,26 +740,33 @@ func (t *Tools) findContext(ctx context.Context, raw json.RawMessage) (any, erro
 		}
 		resolved, resolveErr := filepath.EvalSymlinks(path)
 		if resolveErr == nil && !t.Sandbox.InRoot(resolved) {
+			rel, _ := filepath.Rel(base, path)
+			ignored.add("outside_root", map[string]any{"path": filepath.ToSlash(rel), "type": entryType(d)})
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if t.Sandbox.IsDenied(path) {
+			rel, _ := filepath.Rel(base, path)
+			ignored.add("denied", map[string]any{"path": filepath.ToSlash(rel), "type": entryType(d)})
 			return nil
 		}
 		rel, _ := filepath.Rel(base, path)
 		relSlash := filepath.ToSlash(rel)
 		if matchGlobSet(relSlash, a.ExcludeGlobs, false) {
+			ignored.add("exclude_glob", map[string]any{"path": relSlash, "type": entryType(d)})
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if len(a.PathGlobs) > 0 && !matchGlobSet(relSlash, a.PathGlobs, false) {
+			ignored.add("path_glob_miss", map[string]any{"path": relSlash, "type": entryType(d)})
 			return nil
 		}
 		if len(a.NameGlobs) > 0 && !matchGlobSet(d.Name(), a.NameGlobs, false) {
+			ignored.add("name_glob_miss", map[string]any{"path": relSlash, "type": entryType(d)})
 			return nil
 		}
 		info, err := d.Info()
@@ -727,12 +780,15 @@ func (t *Tools) findContext(ctx context.Context, raw json.RawMessage) (any, erro
 			typ = "symlink"
 		}
 		if a.Type != "any" && a.Type != typ {
+			ignored.add("type_mismatch", map[string]any{"path": relSlash, "type": typ})
 			return nil
 		}
 		if a.MinSizeBytes > 0 && info.Size() < a.MinSizeBytes {
+			ignored.add("min_size", map[string]any{"path": relSlash, "type": typ, "bytes": info.Size()})
 			return nil
 		}
 		if a.MaxSizeBytes > 0 && info.Size() > a.MaxSizeBytes {
+			ignored.add("max_size", map[string]any{"path": relSlash, "type": typ, "bytes": info.Size()})
 			return nil
 		}
 		seenResults++
@@ -748,7 +804,9 @@ func (t *Tools) findContext(ctx context.Context, raw json.RawMessage) (any, erro
 	if truncated {
 		nextOffset = a.Offset + len(results)
 	}
-	return map[string]any{"results": results, "path": displayPath, "cwd": a.Cwd, "offset": a.Offset, "next_offset": nextOffset, "truncated": truncated}, err
+	out := map[string]any{"results": results, "path": displayPath, "cwd": a.Cwd, "offset": a.Offset, "next_offset": nextOffset, "truncated": truncated}
+	ignored.export(out)
+	return out, err
 }
 
 type ReplaceRegexArgs struct {
@@ -1352,6 +1410,7 @@ func (t *Tools) Tree(raw json.RawMessage) (any, error) {
 	lines = append(lines, ".")
 	entries := 0
 	truncated := false
+	ignored := newIgnoredItems(20)
 	var walk func(string, string, int) error
 	walk = func(dir, prefix string, depth int) error {
 		if depth >= a.MaxDepth || entries >= a.MaxEntries {
@@ -1373,17 +1432,24 @@ func (t *Tools) Tree(raw json.RawMessage) (any, error) {
 		visible := make([]os.DirEntry, 0, len(children))
 		for _, child := range children {
 			if !a.IncludeHidden && strings.HasPrefix(child.Name(), ".") {
+				rel, _ := filepath.Rel(base, filepath.Join(dir, child.Name()))
+				ignored.add("hidden", map[string]any{"path": filepath.ToSlash(rel), "type": entryType(child)})
 				continue
 			}
 			path := filepath.Join(dir, child.Name())
 			if t.Sandbox.IsDenied(path) {
+				rel, _ := filepath.Rel(base, path)
+				ignored.add("denied", map[string]any{"path": filepath.ToSlash(rel), "type": entryType(child)})
 				continue
 			}
 			if resolved, err := filepath.EvalSymlinks(path); err == nil && !t.Sandbox.InRoot(resolved) {
+				rel, _ := filepath.Rel(base, path)
+				ignored.add("outside_root", map[string]any{"path": filepath.ToSlash(rel), "type": entryType(child)})
 				continue
 			}
 			rel, _ := filepath.Rel(base, path)
 			if matchGlobSet(filepath.ToSlash(rel), a.ExcludeGlobs, false) {
+				ignored.add("exclude_glob", map[string]any{"path": filepath.ToSlash(rel), "type": entryType(child)})
 				continue
 			}
 			visible = append(visible, child)
@@ -1416,7 +1482,9 @@ func (t *Tools) Tree(raw json.RawMessage) (any, error) {
 	if err := walk(base, "", 0); err != nil {
 		return nil, err
 	}
-	return map[string]any{"path": displayPath, "cwd": a.Cwd, "tree": strings.Join(lines, "\n"), "entries": entries, "truncated": truncated, "max_depth": a.MaxDepth}, nil
+	out := map[string]any{"path": displayPath, "cwd": a.Cwd, "tree": strings.Join(lines, "\n"), "entries": entries, "truncated": truncated, "max_depth": a.MaxDepth}
+	ignored.export(out)
+	return out, nil
 }
 
 type AppendFileArgs struct {

@@ -274,6 +274,7 @@ func Describe(c *config.Config, roots []string, serverVersion string) map[string
 		"tool_catalog":                  true,
 		"tool_catalog_categories":       true,
 		"tool_catalog_category":         true,
+		"tool_catalog_batch":            true,
 		"tool_catalog_all":              true,
 		"policy_describe":               true,
 		"project_info":                  true,

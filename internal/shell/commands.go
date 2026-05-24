@@ -47,6 +47,8 @@ type persistentShellPool struct {
 
 var errPersistentShellBusy = errors.New("persistent shell busy")
 
+const extraArgsPlaceholder = "{{extra_args}}"
+
 func NewRunner(c *config.Config, s *fsx.Sandbox, approver *approval.Manager, projects *project.Manager) *Runner {
 	specs := map[string]config.CommandSpec{}
 	for i := range c.Commands {
@@ -465,26 +467,36 @@ func (r *Runner) dropPersistentSession(sess *persistentShell) {
 }
 
 func (r *Runner) finalCommandArgs(spec config.CommandSpec, extra []string, cwd string, state project.State) ([]string, error) {
-	if len(extra) == 0 {
-		return append([]string(nil), spec.Args...), nil
-	}
-	if !spec.AllowExtraArgs {
-		return nil, fmt.Errorf("command %q does not allow extra_args", spec.Name)
-	}
-	maxExtra := effectiveMaxExtraArgs(spec)
-	if len(extra) > maxExtra {
-		return nil, fmt.Errorf("command %q allows at most %d extra_args", spec.Name, maxExtra)
-	}
-	for _, arg := range extra {
-		if strings.Contains(arg, "\x00") {
-			return nil, errors.New("extra_args cannot contain NUL")
+	if len(extra) > 0 {
+		if !spec.AllowExtraArgs {
+			return nil, fmt.Errorf("command %q does not allow extra_args", spec.Name)
 		}
-		if !r.extraArgAllowed(arg, spec, cwd, state) {
-			return nil, fmt.Errorf("extra arg %q is not allowed for command %q", arg, spec.Name)
+		maxExtra := effectiveMaxExtraArgs(spec)
+		if len(extra) > maxExtra {
+			return nil, fmt.Errorf("command %q allows at most %d extra_args", spec.Name, maxExtra)
+		}
+		for _, arg := range extra {
+			if strings.Contains(arg, "\x00") {
+				return nil, errors.New("extra_args cannot contain NUL")
+			}
+			if !r.extraArgAllowed(arg, spec, cwd, state) {
+				return nil, fmt.Errorf("extra arg %q is not allowed for command %q", arg, spec.Name)
+			}
 		}
 	}
-	args := append([]string(nil), spec.Args...)
-	args = append(args, extra...)
+	args := make([]string, 0, len(spec.Args)+len(extra))
+	inserted := false
+	for _, arg := range spec.Args {
+		if arg == extraArgsPlaceholder {
+			args = append(args, extra...)
+			inserted = true
+			continue
+		}
+		args = append(args, arg)
+	}
+	if !inserted {
+		args = append(args, extra...)
+	}
 	return args, nil
 }
 
