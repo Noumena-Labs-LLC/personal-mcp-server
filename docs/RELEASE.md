@@ -10,21 +10,21 @@ working branches -> PR -> dev -> PR -> main
 
 ## Versioning
 
-Each feature, config, layout, documentation, or discovery change gets a new release version such as `v0.5.7`. Use `-rcN` only for bug, lint, CI, test, or packaging fixes inside that same release line.
+Each feature, config, layout, documentation, or discovery change gets a new release version such as `v0.5.8`. Use `-rcN` only for bug, lint, CI, test, or packaging fixes inside that same release line.
 
 Examples:
 
 ```text
-v0.5.7      feature/docs/tool-discovery change
-v0.5.7-rc1  bug fix in that line
-v0.5.7-rc2  CI/test fix in that line
-v0.5.8      next docs/release pass
+v0.5.8      feature/docs/tool-discovery change
+v0.5.8-rc1  bug fix in that line
+v0.5.8-rc2  CI/test fix in that line
+v0.5.9      next docs/release pass
 ```
 
 Commit subjects for release preparation may start with the exact artifact version, for example:
 
 ```text
-v0.5.7: Prepare public release
+v0.5.8: Prepare public release
 ```
 
 ## Required files
@@ -132,7 +132,7 @@ git push origin vX.Y.Z
 ## Suggested initial public release notes
 
 ```md
-# personal-mcp-server v0.5.7
+# personal-mcp-server v0.5.8
 
 First public release of personal-mcp-server, a localhost Streamable HTTP MCP server for trusted single-user filesystem, Markdown, JSON/JSONL, diagnostics, and named-command workflows.
 

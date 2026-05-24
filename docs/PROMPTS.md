@@ -70,7 +70,7 @@ For large files, first use `fs_get_file_info`, `fs_tail_file`, and `fs_search_te
 
 ## Structured data navigation prompt guidance
 
-For JSON and JSONL files, prefer structured navigation before raw file reads. Use `json_outline`, `json_keys`, `json_slice`, and `json_search` to orient in JSON files, then `json_get` for the specific value needed. Use `jsonl_info` to discover log fields, `jsonl_tail` for recent records, `jsonl_filter` for predicates, and `jsonl_read` for pagination. Avoid whole-file reads for large JSON/JSONL files. These tools are read-only in v0.5.7.
+For JSON and JSONL files, prefer structured navigation before raw file reads. Use `json_outline`, `json_keys`, `json_slice`, and `json_search` to orient in JSON files, then `json_get` for the specific value needed. Use `jsonl_info` to discover log fields, `jsonl_tail` for recent records, `jsonl_filter` for predicates, and `jsonl_read` for pagination. Avoid whole-file reads for large JSON/JSONL files. These tools are read-only in v0.5.8.
 
 When a workflow reveals a missing local capability, confusing result shape, docs gap, or safety-limit friction, submit concise local feedback with `feedback_submit`. Do not include secrets, credentials, private document excerpts, or large pasted file/log contents.
 
