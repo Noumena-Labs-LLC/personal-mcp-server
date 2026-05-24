@@ -37,6 +37,7 @@ func TestIntegrationMCPHTTPFilesystemWorkflow(t *testing.T) {
 	assertContains(t, toolsBody, "tool_catalog")
 	assertContains(t, toolsBody, "tool_catalog_categories")
 	assertContains(t, toolsBody, "tool_catalog_category")
+	assertContains(t, toolsBody, "tool_catalog_batch")
 	assertContains(t, toolsBody, "tool_catalog_all")
 	assertContains(t, toolsBody, "project_config_describe")
 	assertContains(t, toolsBody, "setup_guide")
@@ -73,6 +74,14 @@ func TestIntegrationMCPHTTPFilesystemWorkflow(t *testing.T) {
 
 	catalogCategoryBody := postIntegrationMCP(t, server.URL, rt.port, `{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"tool_catalog_category","arguments":{"category":"project_workflow"}}}`)
 	assertContains(t, catalogCategoryBody, "cmd_run_named")
+
+	catalogBatchBody := postIntegrationMCP(t, server.URL, rt.port, `{"jsonrpc":"2.0","id":315,"method":"tools/call","params":{"name":"tool_catalog_batch","arguments":{"categories":["filesystem_read","project_workflow"],"include_summaries":true,"include_server_info":true,"include_policy":true,"include_guides":true}}}`)
+	assertContains(t, catalogBatchBody, "filesystem_read")
+	assertContains(t, catalogBatchBody, "project_workflow")
+	assertContains(t, catalogBatchBody, "summaries")
+	assertContains(t, catalogBatchBody, "server_info")
+	assertContains(t, catalogBatchBody, "policy")
+	assertContains(t, catalogBatchBody, "guides")
 
 	catalogBody := postIntegrationMCP(t, server.URL, rt.port, `{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"tool_catalog","arguments":{}}}`)
 	assertContains(t, catalogBody, "filesystem_read")

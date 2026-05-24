@@ -89,6 +89,17 @@ values = ["-q", "-v", "-x", "--maxfail=1"]
 
 Claude can then call `cmd_run_named` with `extra_args`, but only arguments accepted by these rules will run.
 
+When a command needs user-supplied positional args before fixed trailing args, place `{{extra_args}}` inside the configured `args` array:
+
+```toml
+[[commands]]
+name = "rg-src"
+exec = "rg"
+args = ["--line-number", "{{extra_args}}", "src"]
+allow_extra_args = true
+max_extra_args = 2
+```
+
 ## Discovery from tools
 
 Use `project_info` with a `cwd` to see whether a project config was found and trusted:

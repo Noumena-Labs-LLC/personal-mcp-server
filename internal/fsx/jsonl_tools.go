@@ -161,11 +161,14 @@ func (t *Tools) jsonLReadContext(ctx context.Context, raw json.RawMessage) (any,
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	records, scanned, malformed, empty, err := readJSONLPageContext(ctx, f, a.Offset, a.Limit)
+	ignored := newIgnoredItems(10)
+	records, scanned, malformed, empty, err := readJSONLPageContext(ctx, f, a.Offset, a.Limit, ignored)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "offset": a.Offset, "limit": a.Limit, "returned": len(records), "scanned_lines": scanned, "empty_skipped": empty, "malformed_skipped": malformed, "records": records, "bytes_read": size}, nil
+	out := map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "offset": a.Offset, "limit": a.Limit, "returned": len(records), "scanned_lines": scanned, "empty_skipped": empty, "malformed_skipped": malformed, "records": records, "bytes_read": size}
+	ignored.export(out)
+	return out, nil
 }
 
 func (t *Tools) JSONLTail(raw json.RawMessage) (any, error) {
@@ -190,6 +193,7 @@ func (t *Tools) jsonLTailContext(ctx context.Context, raw json.RawMessage) (any,
 	scanner.Buffer(make([]byte, 0, 64*1024), int(t.Cfg.Limits.MaxReadBytes))
 	records := []any{}
 	malformed, empty, scanned := 0, 0, 0
+	ignored := newIgnoredItems(10)
 	for scanner.Scan() {
 		if err := contextErr(ctx); err != nil {
 			return nil, err
@@ -199,8 +203,10 @@ func (t *Tools) jsonLTailContext(ctx context.Context, raw json.RawMessage) (any,
 		switch status {
 		case "empty":
 			empty++
+			ignored.add("empty", map[string]any{"line": scanned})
 		case "malformed":
 			malformed++
+			ignored.add("malformed", map[string]any{"line": scanned})
 		default:
 			records = append(records, rec)
 			if len(records) > a.Records {
@@ -211,7 +217,9 @@ func (t *Tools) jsonLTailContext(ctx context.Context, raw json.RawMessage) (any,
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "records_requested": a.Records, "records_returned": len(records), "scanned_lines": scanned, "empty_skipped": empty, "malformed_skipped": malformed, "records": records, "bytes_read": size}, nil
+	out := map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "records_requested": a.Records, "records_returned": len(records), "scanned_lines": scanned, "empty_skipped": empty, "malformed_skipped": malformed, "records": records, "bytes_read": size}
+	ignored.export(out)
+	return out, nil
 }
 
 func (t *Tools) JSONLInfo(raw json.RawMessage) (any, error) {
@@ -243,6 +251,7 @@ func (t *Tools) jsonLInfoContext(ctx context.Context, raw json.RawMessage) (any,
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), int(t.Cfg.Limits.MaxReadBytes))
 	valid, malformed, empty, lines := 0, 0, 0, 0
+	ignored := newIgnoredItems(10)
 	for scanner.Scan() {
 		if err := contextErr(ctx); err != nil {
 			return nil, err
@@ -251,10 +260,12 @@ func (t *Tools) jsonLInfoContext(ctx context.Context, raw json.RawMessage) (any,
 		rec, status := parseJSONLLine(scanner.Text())
 		if status == "empty" {
 			empty++
+			ignored.add("empty", map[string]any{"line": lines})
 			continue
 		}
 		if status == "malformed" {
 			malformed++
+			ignored.add("malformed", map[string]any{"line": lines})
 			continue
 		}
 		valid++
@@ -290,7 +301,9 @@ func (t *Tools) jsonLInfoContext(ctx context.Context, raw json.RawMessage) (any,
 		sort.Strings(types)
 		outFields[k] = map[string]any{"types": types, "present": fields[k].Present}
 	}
-	return map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "bytes": size, "sample_limit": a.Sample, "sampled_valid_records": valid, "scanned_lines": lines, "empty_sampled": empty, "malformed_sampled": malformed, "fields": outFields, "fields_truncated": len(fields) >= a.MaxFields}, nil
+	out := map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "bytes": size, "sample_limit": a.Sample, "sampled_valid_records": valid, "scanned_lines": lines, "empty_sampled": empty, "malformed_sampled": malformed, "fields": outFields, "fields_truncated": len(fields) >= a.MaxFields}
+	ignored.export(out)
+	return out, nil
 }
 
 func (t *Tools) JSONLFilter(raw json.RawMessage) (any, error) {
@@ -332,6 +345,7 @@ func (t *Tools) jsonLFilterContext(ctx context.Context, raw json.RawMessage) (an
 	scanner.Buffer(make([]byte, 0, 64*1024), int(t.Cfg.Limits.MaxReadBytes))
 	records := []any{}
 	scanned, valid, matched, malformed, empty := 0, 0, 0, 0, 0
+	ignored := newIgnoredItems(10)
 	for scanner.Scan() {
 		if err := contextErr(ctx); err != nil {
 			return nil, err
@@ -340,10 +354,12 @@ func (t *Tools) jsonLFilterContext(ctx context.Context, raw json.RawMessage) (an
 		rec, status := parseJSONLLine(scanner.Text())
 		if status == "empty" {
 			empty++
+			ignored.add("empty", map[string]any{"line": scanned})
 			continue
 		}
 		if status == "malformed" {
 			malformed++
+			ignored.add("malformed", map[string]any{"line": scanned})
 			continue
 		}
 		valid++
@@ -368,7 +384,9 @@ func (t *Tools) jsonLFilterContext(ctx context.Context, raw json.RawMessage) (an
 			records[i], records[j] = records[j], records[i]
 		}
 	}
-	return map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "scanned_lines": scanned, "valid_records": valid, "matched": matched, "returned": len(records), "limit": a.Limit, "reverse": a.Reverse, "empty_skipped": empty, "malformed_skipped": malformed, "records": records, "bytes_read": size}, nil
+	out := map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "scanned_lines": scanned, "valid_records": valid, "matched": matched, "returned": len(records), "limit": a.Limit, "reverse": a.Reverse, "empty_skipped": empty, "malformed_skipped": malformed, "records": records, "bytes_read": size}
+	ignored.export(out)
+	return out, nil
 }
 
 func (t *Tools) JSONLValidate(raw json.RawMessage) (any, error) {
@@ -393,6 +411,7 @@ func (t *Tools) jsonLValidateContext(ctx context.Context, raw json.RawMessage) (
 	scanner.Buffer(make([]byte, 0, 64*1024), int(t.Cfg.Limits.MaxReadBytes))
 	lines, valid, malformed, empty := 0, 0, 0, 0
 	samples := []map[string]any{}
+	ignored := newIgnoredItems(a.LimitErrors)
 	for scanner.Scan() {
 		if err := contextErr(ctx); err != nil {
 			return nil, err
@@ -402,8 +421,10 @@ func (t *Tools) jsonLValidateContext(ctx context.Context, raw json.RawMessage) (
 		switch status {
 		case "empty":
 			empty++
+			ignored.add("empty", map[string]any{"line": lines})
 		case "malformed":
 			malformed++
+			ignored.add("malformed", map[string]any{"line": lines})
 			if len(samples) < a.LimitErrors {
 				samples = append(samples, map[string]any{"line": lines})
 			}
@@ -414,10 +435,12 @@ func (t *Tools) jsonLValidateContext(ctx context.Context, raw json.RawMessage) (
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "valid": malformed == 0, "lines": lines, "valid_records": valid, "empty_lines": empty, "malformed_lines": malformed, "error_samples": samples, "bytes_read": size}, nil
+	out := map[string]any{"ok": true, "path": displayPath, "cwd": a.Cwd, "valid": malformed == 0, "lines": lines, "valid_records": valid, "empty_lines": empty, "malformed_lines": malformed, "error_samples": samples, "bytes_read": size}
+	ignored.export(out)
+	return out, nil
 }
 
-func readJSONLPageContext(ctx context.Context, r io.Reader, offset, limit int) (records []any, scanned, malformed, empty int, err error) {
+func readJSONLPageContext(ctx context.Context, r io.Reader, offset, limit int, ignored *ignoredItems) (records []any, scanned, malformed, empty int, err error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	records = []any{}
@@ -430,10 +453,12 @@ func readJSONLPageContext(ctx context.Context, r io.Reader, offset, limit int) (
 		rec, status := parseJSONLLine(scanner.Text())
 		if status == "empty" {
 			empty++
+			ignored.add("empty", map[string]any{"line": scanned})
 			continue
 		}
 		if status == "malformed" {
 			malformed++
+			ignored.add("malformed", map[string]any{"line": scanned})
 			continue
 		}
 		if validSeen >= offset && len(records) < limit {

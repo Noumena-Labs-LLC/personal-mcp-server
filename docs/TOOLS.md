@@ -182,7 +182,9 @@ Notes:
 
 - Plain substring search is the default.
 - Regex is opt-in.
-- Searches skip binaries, denied files, and files over `limits.max_search_file_bytes`.
+- `max_file_size` optionally lowers the per-call file-size ceiling; it cannot exceed `limits.max_search_file_bytes`.
+- Searches skip binaries, denied files, and files over the applied search file-size limit. Results include `applied_max_file_size` plus skipped-file counts and samples.
+- Traversal and JSONL scan tools now surface silent drops with `ignored_count`, `ignored_counts`, and bounded `ignored_samples`.
 - If the response has `truncated=true`, repeat the same call with `offset` set to `next_offset`.
 
 ### `fs_apply_patch`
@@ -282,6 +284,7 @@ Notes:
 - No arbitrary arguments.
 - No PID management or shell job control. Use `cmd_start_named` for server-supervised background jobs.
 - If `cwd` is supplied in the tool call, it wins. If it is omitted, the command may use its configured `cwd`. Global command `cwd` values may be absolute or root-relative and must resolve inside configured roots. Project command `cwd` values must be relative to the trusted project root.
+- Configured command `args` may include `{{extra_args}}` to place validated `extra_args` before fixed trailing args. This is useful for `rg`/`grep`-style commands where the pattern should come before a configured search root such as `"."`.
 - CWD must resolve inside configured roots.
 - Output and runtime are capped.
 - The default argv runner uses a stripped/server-controlled environment, not the user's interactive shell. This is safer and more reproducible, but it can miss pyenv/asdf/nvm/direnv, virtualenv activation, aliases, and shell PATH setup. Trusted project commands can opt into `run_mode = "persistent_shell"` when `[command_environment].allow_persistent_shell = true`.
@@ -504,6 +507,20 @@ When `cwd` points inside a trusted project, `cmd_run_named` first checks project
 {
   "cwd": "my-project",
   "name": "test"
+}
+```
+
+## tool_catalog_batch
+
+`tool_catalog_batch` returns multiple catalog categories in one call, with optional category summaries plus startup context such as `server_info`, `policy`, and `guides`. Use it when a client would otherwise issue several startup discovery calls just to preload the same tool groups.
+
+```json
+{
+  "categories": ["filesystem_read", "project_workflow"],
+  "include_summaries": true,
+  "include_server_info": true,
+  "include_policy": true,
+  "include_guides": true
 }
 ```
 

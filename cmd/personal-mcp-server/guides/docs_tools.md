@@ -5,6 +5,7 @@ Prefer discovery before action:
 - `server_info`
 - `tool_catalog_categories`
 - `tool_catalog_category`
+- `tool_catalog_batch` can batch category discovery and optional startup context (`server_info`, `policy`, `guides`)
 - `tool_catalog_all`
 - `tool_catalog`
 - `policy_describe`
@@ -16,10 +17,12 @@ Prefer discovery before action:
 Prefer bounded file operations:
 
 - `fs_search_text`
+- `fs_search_text` supports per-call `max_file_size`, bounded by `limits.max_search_file_bytes`
 - `fs_get_file_info`
 - `fs_tail_file`
 - `fs_read_file` with line ranges; for files over `limits.max_read_bytes`, avoid whole-file retries and use global config to raise the limit if needed
 - `fs_tree` and `fs_find` only when `server_info.features.native_find` is true
+- Traversal and JSONL tools surface silent drops with `ignored_count`, `ignored_counts`, and `ignored_samples`
 
 Prefer scoped edits and review:
 
@@ -34,6 +37,7 @@ Prefer named commands, workflow discovery, and policy explanations:
 - `workflow_list`
 - `cmd_list_named`
 - `cmd_run_named`
+- `cmd_run_named` supports `{{extra_args}}` placeholders inside configured command args for rg/grep-style positional passthrough
 - `cmd_explain_policy`
 - `cmd_run_argv`
 

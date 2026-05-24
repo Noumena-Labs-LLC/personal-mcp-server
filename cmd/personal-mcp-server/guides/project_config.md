@@ -85,6 +85,17 @@ kind = "enum"
 values = ["-q", "-v", "-x", "--maxfail=1"]
 ```
 
+When a command needs user-supplied positional args before fixed trailing args, place `{{extra_args}}` inside the configured `args` list:
+
+```toml
+[[commands]]
+name = "rg-src"
+exec = "rg"
+args = ["--line-number", "{{extra_args}}", "src"]
+allow_extra_args = true
+max_extra_args = 2
+```
+
 ## Protected and generated files
 
 Use these sections to help the LLM avoid unsafe edits.

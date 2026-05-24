@@ -602,6 +602,33 @@ func TestFinalCommandArgsAllowsExtraArgsWithoutRules(t *testing.T) {
 	}
 }
 
+func TestFinalCommandArgsInsertsExtraArgsAtPlaceholder(t *testing.T) {
+	root := t.TempDir()
+	cfg := shellTestConfig(root)
+	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
+	spec := config.CommandSpec{
+		Name:           "rg",
+		Args:           []string{"--line-number", extraArgsPlaceholder, "."},
+		AllowExtraArgs: true,
+		MaxExtraArgs:   2,
+	}
+	args, err := r.finalCommandArgs(spec, []string{"needle"}, ".", project.State{})
+	if err != nil {
+		t.Fatalf("valid placeholder extra args: %v", err)
+	}
+	if got := strings.Join(args, " "); got != "--line-number needle ." {
+		t.Fatalf("unexpected args %q", got)
+	}
+
+	args, err = r.finalCommandArgs(spec, nil, ".", project.State{})
+	if err != nil {
+		t.Fatalf("empty extra args with placeholder: %v", err)
+	}
+	if got := strings.Join(args, " "); got != "--line-number ." {
+		t.Fatalf("unexpected args without extra args %q", got)
+	}
+}
+
 func TestStartNamedRejectsInvalidExtraArgsSynchronously(t *testing.T) {
 	root := t.TempDir()
 	cfg := shellTestConfig(root)

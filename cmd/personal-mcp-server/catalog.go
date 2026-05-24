@@ -37,6 +37,7 @@ func toolCatalogAll(cfg *config.Config) map[string]any {
 				{Name: "tool_catalog", Purpose: "Compatibility alias for tool_catalog_all.", Enabled: true, ReadOnly: true, Guide: "guide/tools"},
 				{Name: "tool_catalog_categories", Purpose: "Return compact catalog category summaries and enabled/disabled counts.", Enabled: true, ReadOnly: true, Guide: "guide/tools"},
 				{Name: "tool_catalog_category", Purpose: "Return tools for one catalog category with optional disabled/query filtering.", Enabled: true, ReadOnly: true, Guide: "guide/tools"},
+				{Name: "tool_catalog_batch", Purpose: "Return multiple catalog categories in one call, optionally with category summaries.", Enabled: true, ReadOnly: true, Guide: "guide/tools"},
 				{Name: "tool_catalog_all", Purpose: "Return the complete hierarchical tool catalog.", Enabled: true, ReadOnly: true, Guide: "guide/tools"},
 				{Name: "policy_describe", Purpose: "Describe roots, enabled tools, file policy, command policy, and approval behavior without secrets.", Enabled: true, ReadOnly: true, Guide: "docs/security"},
 				{Name: "guide_list", Purpose: "List embedded LLM-readable guides and release docs available through guide_read.", Enabled: true, ReadOnly: true, Guide: "guide/index"},
@@ -148,7 +149,7 @@ func toolCatalogAll(cfg *config.Config) map[string]any {
 		},
 	}
 	return map[string]any{
-		"note":       "MCP tools/list is flat; prefer tool_catalog_categories then tool_catalog_category for progressive reveal. tool_catalog_all returns the complete catalog.",
+		"note":       "MCP tools/list is flat; prefer tool_catalog_categories then tool_catalog_category for progressive reveal, or tool_catalog_batch to preload multiple categories. tool_catalog_all returns the complete catalog.",
 		"categories": categories,
 	}
 }
@@ -157,6 +158,16 @@ type toolCatalogCategoryArgs struct {
 	Category        string `json:"category"`
 	IncludeDisabled bool   `json:"include_disabled"`
 	Query           string `json:"query"`
+}
+
+type toolCatalogBatchArgs struct {
+	Categories       []string `json:"categories"`
+	IncludeDisabled  bool     `json:"include_disabled"`
+	Query            string   `json:"query"`
+	IncludeSummaries bool     `json:"include_summaries"`
+	IncludeServer    bool     `json:"include_server_info"`
+	IncludePolicy    bool     `json:"include_policy"`
+	IncludeGuides    bool     `json:"include_guides"`
 }
 
 func toolCatalogCategories(cfg *config.Config) map[string]any {
@@ -204,4 +215,30 @@ func buildToolCatalogCategory(cfg *config.Config, args toolCatalogCategoryArgs) 
 		return map[string]any{"category": category.Name, "title": category.Title, "purpose": category.Purpose, "tools": tools, "count": len(tools), "include_disabled": args.IncludeDisabled}, nil
 	}
 	return nil, fmt.Errorf("unknown category %q", name)
+}
+
+func buildToolCatalogBatch(cfg *config.Config, args toolCatalogBatchArgs) (map[string]any, error) {
+	selected := make([]map[string]any, 0, len(args.Categories))
+	for _, category := range args.Categories {
+		item, err := buildToolCatalogCategory(cfg, toolCatalogCategoryArgs{
+			Category:        category,
+			IncludeDisabled: args.IncludeDisabled,
+			Query:           args.Query,
+		})
+		if err != nil {
+			return nil, err
+		}
+		selected = append(selected, item)
+	}
+	out := map[string]any{
+		"categories":        selected,
+		"count":             len(selected),
+		"include_disabled":  args.IncludeDisabled,
+		"query":             strings.TrimSpace(args.Query),
+		"include_summaries": args.IncludeSummaries,
+	}
+	if args.IncludeSummaries || len(args.Categories) == 0 {
+		out["summaries"] = toolCatalogCategories(cfg)
+	}
+	return out, nil
 }

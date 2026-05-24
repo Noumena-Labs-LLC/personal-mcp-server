@@ -84,22 +84,34 @@ func TestJSONLNavigationAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resultMap(t, info)["sampled_valid_records"] != 2 {
+	infoMap := resultMap(t, info)
+	if infoMap["sampled_valid_records"] != 2 {
 		t.Fatalf("expected two valid sampled records: %#v", info)
+	}
+	if counts := resultIntMap(t, infoMap["ignored_counts"], "ignored_counts"); counts["empty"] != 1 || counts["malformed"] != 1 {
+		t.Fatalf("expected empty/malformed ignored counts: %#v", counts)
 	}
 	filtered, err := tools.JSONLFilter(json.RawMessage(`{"path":"events.jsonl","where":{"ok":false},"exists":["error"],"limit":10}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resultMap(t, filtered)["returned"] != 1 {
+	filteredMap := resultMap(t, filtered)
+	if filteredMap["returned"] != 1 {
 		t.Fatalf("expected one filtered record: %#v", filtered)
+	}
+	if counts := resultIntMap(t, filteredMap["ignored_counts"], "ignored_counts"); counts["empty"] != 1 || counts["malformed"] != 1 {
+		t.Fatalf("expected empty/malformed ignored counts for filter: %#v", counts)
 	}
 	validation, err := tools.JSONLValidate(json.RawMessage(`{"path":"events.jsonl"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resultMap(t, validation)["malformed_lines"] != 1 {
+	validationMap := resultMap(t, validation)
+	if validationMap["malformed_lines"] != 1 {
 		t.Fatalf("expected one malformed line: %#v", validation)
+	}
+	if counts := resultIntMap(t, validationMap["ignored_counts"], "ignored_counts"); counts["empty"] != 1 || counts["malformed"] != 1 {
+		t.Fatalf("expected empty/malformed ignored counts for validation: %#v", counts)
 	}
 }
 

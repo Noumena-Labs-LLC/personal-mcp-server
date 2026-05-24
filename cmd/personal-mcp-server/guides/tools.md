@@ -2,7 +2,7 @@
 
 Start with discovery:
 
-1. Call `server_info`, `tool_catalog_categories`, `guide_list`, and `policy_describe`, or read `personal-mcp://server` and `personal-mcp://policy`. Use `tool_catalog_category` for one category and `tool_catalog_all` only when a complete catalog is needed.
+1. Call `server_info`, `tool_catalog_categories`, `guide_list`, and `policy_describe`, or read `personal-mcp://server` and `personal-mcp://policy`. Use `tool_catalog_category` for one category, `tool_catalog_batch` to preload several categories plus optional server/policy/guide context in one round-trip, and `tool_catalog_all` only when a complete catalog is needed.
 2. Read `personal-mcp://roots`, `personal-mcp://guide/index`, and `personal-mcp://guide/tools`.
 3. Use `project_info` and `workflow_list` with `cwd` before guessing project commands.
 4. Use read-only resources for context and tools for actions.
@@ -21,6 +21,7 @@ Read-only workflow:
 - Use `fs_find` to discover files when `server_info.features.native_find` is true; otherwise use `fs_search_text` for Go-native grep-like search before reading many files.
 - Use `fs_get_file_info` before reading unfamiliar files; it returns size, text sniffing, a line-count estimate, and large-file suggestions.
 - Use `fs_tail_file` for recent log output and `fs_read_file` with `start_line` and `max_lines` for source or targeted context. If a file is over `limits.max_read_bytes`, do not retry whole-file reads; use targeted search/ranges or ask the user to raise `[limits].max_read_bytes` in the global config (`~/.personal-mcp-server/config/config.toml`) and verify with `policy_describe`.
+- When traversal or JSONL tools skip hidden, denied, malformed, oversized, or escaped items, inspect `ignored_count`, `ignored_counts`, and `ignored_samples` instead of assuming the result set is exhaustive.
 - For Markdown files, prefer `md_outline` and `md_read_section` before reading whole documents.
 - Avoid `whole_file=true` on large files unless the user explicitly needs the whole file.
 
@@ -38,6 +39,7 @@ Command workflow:
 
 - Use `cmd_list_named` and `workflow_list` before `cmd_run_named` or `cmd_start_named`. With `include_args=true`, check configured `cwd`, `run_mode`, `shell`, and extra-arg rules.
 - Prefer trusted project named commands over dynamic argv commands. If a named command has configured `cwd`, the tool call may omit `cwd`; when the tool call supplies `cwd`, it wins.
+- Configured named command `args` may include `{{extra_args}}` to place validated `extra_args` before fixed trailing args for `rg`/`grep`-style commands.
 - Use `cmd_explain_policy` before `cmd_run_argv`.
 - Use `cmd_run_sequence` for configured multi-step workflows instead of raw `&&` or `;` chaining.
 - No raw user-provided shell strings are supported. Direct argv commands do not use pipes, redirects, shell glob expansion, or shell-managed background jobs. Trusted project commands may opt into `run_mode = "persistent_shell"`, but the command string is still built from configured argv and validated `extra_args`. Use `cmd_start_named` plus `cmd_job_status`, `cmd_job_read`, `cmd_job_cancel`, and `cmd_job_list` for server-supervised background jobs with server-owned stdout/stderr capture.
@@ -48,7 +50,7 @@ Approval workflow:
 - The server does not show a native OS or Claude Desktop dialog. The local user can inspect and decide approvals through the approval CLI (`personal-mcp-server approvals watch/list/approve/deny`) or local approval HTTP endpoints.
 
 
-When MCP resources are not visible to the model, use `guide_read` instead of `personal-mcp://guide/*` URIs. MCP `tools/list` is flat; use `tool_catalog_categories` then `tool_catalog_category` for grouped progressive discovery. `tool_catalog_all` returns the full catalog, and `tool_catalog` remains a compatibility alias. Some tools described in guides are feature-gated; check `server_info.features`, `policy_describe.cwd.disabled_tools`, or catalog `enabled` fields before using them.
+When MCP resources are not visible to the model, use `guide_read` instead of `personal-mcp://guide/*` URIs. MCP `tools/list` is flat; use `tool_catalog_categories` then `tool_catalog_category` for grouped progressive discovery, or `tool_catalog_batch` to fetch several categories at once. `tool_catalog_all` returns the full catalog, and `tool_catalog` remains a compatibility alias. Some tools described in guides are feature-gated; check `server_info.features`, `policy_describe.cwd.disabled_tools`, or catalog `enabled` fields before using them.
 
 
 ## Structured JSON and JSONL navigation

@@ -62,6 +62,15 @@ func resultWarnings(t *testing.T, m map[string]any) []string {
 	return warnings
 }
 
+func resultIntMap(t *testing.T, v any, key string) map[string]int {
+	t.Helper()
+	m, ok := v.(map[string]int)
+	if !ok {
+		t.Fatalf("expected %q to be map[string]int, got %T", key, v)
+	}
+	return m
+}
+
 func TestGetFileInfoIncludesLargeFileGuidance(t *testing.T) {
 	root := t.TempDir()
 	cfg := testConfig(root)
@@ -271,6 +280,55 @@ func TestSearchTextOffsetPagination(t *testing.T) {
 	}
 }
 
+func TestSearchTextHonorsPerCallMaxFileSize(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	cfg.Limits.MaxSearchResults = 10
+	cfg.Limits.MaxSearchFileBytes = 1024
+	tools := NewTools(cfg, nil)
+	if err := os.WriteFile(filepath.Join(root, "small.txt"), []byte("needle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte("needle in large file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := tools.SearchText(json.RawMessage(`{"path":".","query":"needle","max_file_size":6}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, out)
+	if got, ok := m["applied_max_file_size"].(int64); !ok || got != 6 {
+		t.Fatalf("expected applied_max_file_size=6, got %#v", m["applied_max_file_size"])
+	}
+	if got := resultInt(t, m, "skipped_too_large_count"); got != 2 {
+		t.Fatalf("expected both files to be skipped, got %d", got)
+	}
+
+	out, err = tools.SearchText(json.RawMessage(`{"path":".","query":"needle","max_file_size":64}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = resultMap(t, out)
+	if got := resultInt(t, m, "skipped_too_large_count"); got != 0 {
+		t.Fatalf("expected no skipped files, got %d", got)
+	}
+	matches := reflect.ValueOf(m["matches"])
+	if matches.Len() != 2 {
+		t.Fatalf("expected 2 matches, got %d", matches.Len())
+	}
+}
+
+func TestSearchTextRejectsMaxFileSizeAboveConfiguredLimit(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	cfg.Limits.MaxSearchFileBytes = 8
+	tools := NewTools(cfg, nil)
+	if _, err := tools.SearchText(json.RawMessage(`{"path":".","query":"needle","max_file_size":9}`)); err == nil {
+		t.Fatal("expected max_file_size limit error")
+	}
+}
+
 func TestFindOffsetPagination(t *testing.T) {
 	root := t.TempDir()
 	cfg := testConfig(root)
@@ -476,6 +534,73 @@ func TestFindFiltersByGlobAndType(t *testing.T) {
 	results := reflect.ValueOf(m["results"])
 	if results.Len() != 1 {
 		t.Fatalf("expected one result, got %#v", m["results"])
+	}
+}
+
+func TestListDirSurfacesIgnoredEntries(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	tools := NewTools(cfg, nil)
+	if err := os.WriteFile(filepath.Join(root, ".hidden.txt"), []byte("hidden\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := tools.ListDir(json.RawMessage(`{"path":".","include_hidden":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, out)
+	if got := resultInt(t, m, "ignored_count"); got != 1 {
+		t.Fatalf("expected ignored_count=1, got %d", got)
+	}
+	counts := resultIntMap(t, m["ignored_counts"], "ignored_counts")
+	if counts["hidden"] != 1 {
+		t.Fatalf("expected hidden ignored count, got %#v", counts)
+	}
+}
+
+func TestSearchTextSurfacesIgnoredReasons(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	cfg.Limits.MaxSearchFileBytes = 1024
+	tools := NewTools(cfg, nil)
+	if err := os.WriteFile(filepath.Join(root, ".hidden.txt"), []byte("needle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte("needle in large file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin.dat"), []byte{'n', 'e', 0, 'd', 'l', 'e'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := tools.SearchText(json.RawMessage(`{"path":".","query":"needle","max_file_size":8}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, out)
+	counts := resultIntMap(t, m["ignored_counts"], "ignored_counts")
+	if counts["too_large"] != 1 || counts["binary"] != 1 {
+		t.Fatalf("unexpected ignored_counts %#v", counts)
+	}
+}
+
+func TestFindSurfacesIgnoredReasons(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	tools := NewTools(cfg, nil)
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.go"), []byte("package b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := tools.Find(json.RawMessage(`{"path":".","type":"file","name_globs":["*.go"],"exclude_globs":["a.txt"],"max_results":10}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, out)
+	counts := resultIntMap(t, m["ignored_counts"], "ignored_counts")
+	if counts["exclude_glob"] != 1 {
+		t.Fatalf("expected exclude_glob ignored count, got %#v", counts)
 	}
 }
 
