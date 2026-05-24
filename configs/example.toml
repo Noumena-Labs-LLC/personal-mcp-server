@@ -210,7 +210,7 @@ Read one Markdown section by heading id or title. Use md_outline first to discov
 [tools.md_replace_section]
 enabled = false
 description = """
-Replace one Markdown section body by heading id or title. Supports optional dry_run previews.
+Replace one Markdown section body by heading id or title. By default preserves the heading line; when include_heading=true, the replacement content must begin with the existing heading line. Supports optional dry_run previews.
 """
 
 [tools.md_replace_section_heading]
@@ -513,7 +513,7 @@ Use personal MCP server carefully.
 
 Rules:
 - Work only inside the configured roots.
-- Start by calling server_info, tool_catalog_categories, guide_list, and policy_describe or reading personal-mcp://policy and personal-mcp://guide/tools.
+- Start by calling tool_catalog_batch for startup discovery, or reading personal-mcp://policy and personal-mcp://guide/tools.
 - Search before reading broadly.
 - Read bounded line ranges, not huge files.
 - Do not request denied secret files.
@@ -530,7 +530,7 @@ template = """
 Inspect the project using personal MCP server without modifying files.
 
 Workflow:
-1. Call server_info, tool_catalog_categories, guide_list, and policy_describe, then read personal-mcp://roots and personal-mcp://guide/tools when resources are available.
+1. Call tool_catalog_batch, then read personal-mcp://roots and personal-mcp://guide/tools when resources are available.
 2. Use fs_list_dir to understand the top-level structure.
 3. Use fs_search_text to find relevant files or symbols.
 4. Use fs_get_file_info before reading unknown files and fs_tail_file for recent log output.
@@ -546,7 +546,7 @@ template = """
 Make the requested code change using personal MCP server.
 
 Workflow:
-1. Call server_info, tool_catalog_categories, and policy_describe, then stay inside configured roots.
+1. Call tool_catalog_batch and policy_describe, then stay inside configured roots.
 2. Inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file.
 3. Use fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful, and review the diff.
 4. Apply the patch only when the intended change is clear.

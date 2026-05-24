@@ -5,7 +5,7 @@ Use this index to orient yourself before configuring or operating personal MCP s
 Recommended first reads:
 
 1. `personal-mcp://server` for version and enabled capabilities.
-2. `tool_catalog_categories` then `tool_catalog_category` for progressive tool discovery when the client only shows a flat tool list.
+2. `tool_catalog_batch` for one-call startup discovery when the client only shows a flat tool list; use `tool_catalog_category` only for narrower follow-up discovery.
 3. `personal-mcp://policy` for roots, tools, file policy, command policy, and approval behavior.
 4. `personal-mcp://guide/tools` for safe tool-use workflow.
 5. `personal-mcp://guide/project-config` before creating or editing `.personal-mcp-server.toml`.

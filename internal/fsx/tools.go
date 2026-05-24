@@ -1660,6 +1660,11 @@ func (t *Tools) MarkdownReplaceSection(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if a.IncludeHeading {
+		if err := validateMarkdownSectionReplacement(section, a.Content); err != nil {
+			return nil, err
+		}
+	}
 	lines := splitLinesKeepEnd(original)
 	start := section.LineStart
 	if !a.IncludeHeading {

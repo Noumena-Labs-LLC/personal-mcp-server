@@ -20,13 +20,13 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		s.Register(mcphttp.Tool{Name: "server_info", Description: cfg.ToolDescription("server_info", "Return personal MCP server server version, module path, transport, enabled feature summary, and large-file usage guidance."), InputSchema: noArgsSchema, Handler: func(json.RawMessage) (any, error) {
 			return serverInfo(cfg), nil
 		}})
-		s.Register(mcphttp.Tool{Name: "tool_catalog", Description: cfg.ToolDescription("tool_catalog", "Compatibility alias for tool_catalog_all. Prefer tool_catalog_categories then tool_catalog_category for progressive reveal in MCP clients."), InputSchema: noArgsSchema, Handler: func(json.RawMessage) (any, error) {
+		s.Register(mcphttp.Tool{Name: "tool_catalog", Description: cfg.ToolDescription("tool_catalog", "Compatibility alias for tool_catalog_all. Prefer tool_catalog_batch for one-call startup discovery, or tool_catalog_categories then tool_catalog_category for progressive reveal in MCP clients."), InputSchema: noArgsSchema, Handler: func(json.RawMessage) (any, error) {
 			start := time.Now()
 			out := toolCatalogAll(cfg)
 			slog.Debug("tool_catalog completed", "duration_ms", time.Since(start).Milliseconds())
 			return out, nil
 		}})
-		s.Register(mcphttp.Tool{Name: "tool_catalog_all", Description: "Return the complete hierarchical catalog of personal MCP server tools. Prefer tool_catalog_categories and tool_catalog_category when a client may time out on large responses.", InputSchema: noArgsSchema, Handler: func(json.RawMessage) (any, error) {
+		s.Register(mcphttp.Tool{Name: "tool_catalog_all", Description: "Return the complete hierarchical catalog of personal MCP server tools. Prefer tool_catalog_batch for startup context or tool_catalog_categories and tool_catalog_category when a client may time out on large responses.", InputSchema: noArgsSchema, Handler: func(json.RawMessage) (any, error) {
 			start := time.Now()
 			out := toolCatalogAll(cfg)
 			slog.Debug("tool_catalog_all completed", "duration_ms", time.Since(start).Milliseconds())
@@ -51,7 +51,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 			slog.Debug("tool_catalog_category completed", "category", args.Category, "duration_ms", time.Since(start).Milliseconds(), "err", err)
 			return out, err
 		}})
-		s.Register(mcphttp.Tool{Name: "tool_catalog_batch", Description: "Return multiple tool catalog categories in one call, optionally with category summaries, to reduce startup discovery round-trips.", InputSchema: map[string]any{
+		s.Register(mcphttp.Tool{Name: "tool_catalog_batch", Description: "Return multiple tool catalog categories in one call, optionally with category summaries and startup context. When categories are omitted, returns the recommended startup bundle to reduce discovery round-trips.", InputSchema: map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{
 				"categories":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -66,6 +66,12 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 			var args toolCatalogBatchArgs
 			if err := json.Unmarshal(raw, &args); err != nil {
 				return nil, err
+			}
+			if len(args.Categories) == 0 && !args.IncludeSummaries && !args.IncludeServer && !args.IncludePolicy && !args.IncludeGuides {
+				args.IncludeSummaries = true
+				args.IncludeServer = true
+				args.IncludePolicy = true
+				args.IncludeGuides = true
 			}
 			start := time.Now()
 			out, err := buildToolCatalogBatch(cfg, args)
@@ -347,7 +353,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		}, Handler: ft.MarkdownReadSection, ContextHandler: ft.MarkdownReadSectionContext})
 	}
 	if cfg.Tools.MarkdownReplaceSection.Enabled {
-		s.Register(mcphttp.Tool{Name: "md_replace_section", Description: cfg.ToolDescription("md_replace_section", "Replace one Markdown section body by heading id or title. By default preserves the heading line; set include_heading=true to replace the whole section."), InputSchema: map[string]any{
+		s.Register(mcphttp.Tool{Name: "md_replace_section", Description: cfg.ToolDescription("md_replace_section", "Replace one Markdown section body by heading id or title. By default preserves the heading line; set include_heading=true only when content includes the existing heading line at the top."), InputSchema: map[string]any{
 			"type": "object", "required": []string{"path", "section", "content"}, "additionalProperties": false,
 			"properties": map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema(), "section": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}, "include_heading": map[string]any{"type": "boolean"}, "dry_run": map[string]any{"type": "boolean"}, "create_backup": map[string]any{"type": "boolean"}},
 		}, Handler: ft.MarkdownReplaceSection})

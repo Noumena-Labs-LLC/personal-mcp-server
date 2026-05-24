@@ -203,3 +203,24 @@ func normalizeMarkdownBlock(s string) string {
 	}
 	return s
 }
+
+func validateMarkdownSectionReplacement(section MarkdownSection, content string) error {
+	lines := splitLinesKeepEnd(normalizeMarkdownBlock(content))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		m := atxHeadingRE.FindStringSubmatch(strings.TrimRight(line, "\r\n"))
+		if m == nil {
+			return fmt.Errorf("include_heading=true requires content to start with the existing heading line %q; omit include_heading to replace only the section body", strings.TrimSpace(strings.Repeat("#", section.Level)+" "+section.Title))
+		}
+		level := len(m[1])
+		title := strings.TrimSpace(m[2])
+		if level != section.Level || title != section.Title {
+			return fmt.Errorf("include_heading=true requires the existing heading line %q at the top of content; use md_replace_section_heading to rename or relevel headings", strings.TrimSpace(strings.Repeat("#", section.Level)+" "+section.Title))
+		}
+		return nil
+	}
+	return fmt.Errorf("include_heading=true requires content to include the existing heading line %q", strings.TrimSpace(strings.Repeat("#", section.Level)+" "+section.Title))
+}

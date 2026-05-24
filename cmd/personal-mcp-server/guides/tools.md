@@ -2,7 +2,7 @@
 
 Start with discovery:
 
-1. Call `server_info`, `tool_catalog_categories`, `guide_list`, and `policy_describe`, or read `personal-mcp://server` and `personal-mcp://policy`. Use `tool_catalog_category` for one category, `tool_catalog_batch` to preload several categories plus optional server/policy/guide context in one round-trip, and `tool_catalog_all` only when a complete catalog is needed.
+1. Call `tool_catalog_batch` first. Use it with explicit categories when needed, or with no arguments for the recommended startup bundle plus startup context in one round-trip. Read `personal-mcp://server` and `personal-mcp://policy` when resources are available. Use `tool_catalog_category` only for narrower follow-up discovery, and `tool_catalog_all` only when a complete catalog is needed.
 2. Read `personal-mcp://roots`, `personal-mcp://guide/index`, and `personal-mcp://guide/tools`.
 3. Use `project_info` and `workflow_list` with `cwd` before guessing project commands.
 4. Use read-only resources for context and tools for actions.
@@ -29,7 +29,7 @@ Edit workflow:
 
 - Use `file_explain_policy` before risky edits.
 - Use `fs_apply_patch` for scoped edits. `dry_run=true` is optional when a preview is useful. `expected_replacements` caps replacements and may return warnings when the found count differs; treat warnings as review signals. If the old text is not found, re-read the exact target range before retrying. Use `fs_apply_unified_patch` only when `server_info.features.unified_patch` is true and `fs_replace_regex` only when `server_info.features.regex_replace` is true.
-- For Markdown docs, prefer `md_replace_section`, `md_replace_section_heading`, `md_insert_section`, `md_append_section`, or `md_append_subsection`; use `dry_run=true` only when a preview is useful. Use `md_replace_section_heading` for heading-only renames and `md_append_subsection` for child sections under an existing parent.
+- For Markdown docs, prefer `md_replace_section`, `md_replace_section_heading`, `md_insert_section`, `md_append_section`, or `md_append_subsection`; use `dry_run=true` only when a preview is useful. Use `md_replace_section_heading` for heading-only renames. When `md_replace_section` uses `include_heading=true`, the replacement content must begin with the existing heading line. Use `md_append_subsection` for child sections under an existing parent.
 - Use `fs_append_file` for simple append-only updates when a structured Markdown section tool does not fit.
 - Review compact diffs before applying.
 - Use `git_diff` after edits when the target is inside a git repository.
@@ -50,7 +50,7 @@ Approval workflow:
 - The server does not show a native OS or Claude Desktop dialog. The local user can inspect and decide approvals through the approval CLI (`personal-mcp-server approvals watch/list/approve/deny`) or local approval HTTP endpoints.
 
 
-When MCP resources are not visible to the model, use `guide_read` instead of `personal-mcp://guide/*` URIs. MCP `tools/list` is flat; use `tool_catalog_categories` then `tool_catalog_category` for grouped progressive discovery, or `tool_catalog_batch` to fetch several categories at once. `tool_catalog_all` returns the full catalog, and `tool_catalog` remains a compatibility alias. Some tools described in guides are feature-gated; check `server_info.features`, `policy_describe.cwd.disabled_tools`, or catalog `enabled` fields before using them.
+When MCP resources are not visible to the model, use `guide_read` instead of `personal-mcp://guide/*` URIs. MCP `tools/list` is flat; prefer `tool_catalog_batch` for grouped startup discovery, then `tool_catalog_category` only when you need a narrower follow-up view. `tool_catalog_all` returns the full catalog, and `tool_catalog` remains a compatibility alias. Some tools described in guides are feature-gated; check `server_info.features`, `policy_describe.cwd.disabled_tools`, or catalog `enabled` fields before using them.
 
 
 ## Structured JSON and JSONL navigation
@@ -64,7 +64,7 @@ Use these read-only tools to navigate structured data without dumping whole file
 - `json_search`: search keys and scalar values, returning pointers and previews; use `type_filter` and `pointer_prefix` to narrow large documents.
 - `json_validate`: validate JSON and report the root type.
 
-For JSONL logs, prefer `jsonl_info` first to discover fields, then use `jsonl_filter`, `jsonl_tail`, or `jsonl_read` for bounded records. `jsonl_filter` supports exact matches, contains, exists/missing, nested dotted fields, numeric ranges, and timestamp ranges. Malformed and empty lines are counted instead of crashing the workflow. JSON and JSONL tools remain read-only in v0.5.8.
+For JSONL logs, prefer `jsonl_info` first to discover fields, then use `jsonl_filter`, `jsonl_tail`, or `jsonl_read` for bounded records. `jsonl_filter` supports exact matches, contains, exists/missing, nested dotted fields, numeric ranges, and timestamp ranges. Malformed and empty lines are counted instead of crashing the workflow. JSON and JSONL tools remain read-only in v0.5.9.
 
 
 ## Local feedback
