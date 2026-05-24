@@ -114,7 +114,11 @@ func (r *Runner) StartNamed(raw json.RawMessage) (any, error) {
 
 	go r.runCommandJob(ctx, job, prepared.Spec, prepared.Cwd, prepared.FinalArgs)
 
-	return StartNamedResult{JobID: job.ID, Name: job.Name, Cwd: job.Cwd, Status: job.Status, StartedAt: job.Started.Format(time.RFC3339)}, nil
+	job.mu.Lock()
+	status := job.Status
+	startedAt := job.Started.Format(time.RFC3339)
+	job.mu.Unlock()
+	return StartNamedResult{JobID: job.ID, Name: job.Name, Cwd: job.Cwd, Status: status, StartedAt: startedAt}, nil
 }
 
 func (r *Runner) maxBackgroundJobs() int {

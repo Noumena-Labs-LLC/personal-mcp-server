@@ -22,6 +22,7 @@ just test
 just test-race
 just integration-test
 just smoke-test
+just stress-test
 just vet
 just staticcheck
 just golangci-lint
@@ -38,6 +39,8 @@ just ci
 `just integration-test` runs MCP HTTP integration tests against the real runtime handler with temporary roots, config, token, and audit files. It covers initialize, tool listing, selected filesystem tool calls, and auth/Host/Origin checks.
 
 `just smoke-test` runs subprocess smoke checks for CLI/server startup paths without using real user config. The smoke helper writes only to temporary config/root/audit/trust-store paths and cleans up the helper server with interrupt-first shutdown, kill fallback, and a single wait path.
+
+`just stress-test` runs a separate opt-in stress tier. It reuses the subprocess helper path, but it adds repeated startup/shutdown, concurrent MCP traffic, background job churn, and persistent-shell contention to surface timeout and race failures. It is intentionally excluded from the default CI path.
 
 The integration and smoke tests are native Go tests. They create temporary config files, roots, audit logs, trust stores, and token state for each run; they do not read or write the user's real `~/.personal-mcp-server/config` files.
 
@@ -59,6 +62,6 @@ Run `just tools` to install pinned developer tools into `.tools/bin`. The lint a
 
 ## Audit workflow
 
-`just ci` is the required local quality gate and now explicitly runs native integration and smoke tests in addition to race-enabled package tests. The integration and smoke tests are also available as standalone targets for focused debugging.
+`just ci` is the required local quality gate and now explicitly runs native integration and smoke tests in addition to race-enabled package tests. The integration, smoke, and stress tests are also available as standalone targets for focused debugging, with stress kept out of default CI.
 
 The current code quality, security, and documentation audit notes are recorded in `docs/AUDIT.md`. Update that document when audit posture changes materially.

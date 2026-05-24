@@ -563,6 +563,8 @@ func TestStartNamedJobCancel(t *testing.T) {
 func waitForJobStatus(t *testing.T, r *Runner, jobID, want string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
 	for time.Now().Before(deadline) {
 		status, err := r.JobStatus(json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, jobID)))
 		if err != nil {
@@ -572,7 +574,7 @@ func waitForJobStatus(t *testing.T, r *Runner, jobID, want string) {
 		if got, _ := m["status"].(string); got == want {
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		<-ticker.C
 	}
 	status, _ := r.JobStatus(json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, jobID)))
 	t.Fatalf("job did not reach status %q; last status %#v", want, status)
@@ -636,6 +638,8 @@ func TestStartNamedJobReadShowsOutputWhileRunning(t *testing.T) {
 		t.Fatalf("expected StartNamedResult, got %T", started)
 	}
 	deadline := time.Now().Add(1500 * time.Millisecond)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 	for time.Now().Before(deadline) {
 		read, err := r.JobRead(json.RawMessage(fmt.Sprintf(`{"job_id":%q,"tail_bytes":2000}`, startMap.JobID)))
 		if err != nil {
@@ -645,7 +649,7 @@ func TestStartNamedJobReadShowsOutputWhileRunning(t *testing.T) {
 		if got, _ := m["stdout_tail"].(string); strings.Contains(got, "first") {
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		<-ticker.C
 	}
 	t.Fatalf("expected running job output to be readable")
 }

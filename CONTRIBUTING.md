@@ -37,6 +37,7 @@ just test
 just test-race
 just integration-test
 just smoke-test
+just stress-test
 just vet
 just staticcheck
 just golangci-lint
@@ -47,6 +48,8 @@ just build
 ```
 
 Before proposing a change, run at least the relevant focused tests. Maintainers should run `just ci` before merging release-bound changes.
+
+If you are working on concurrency or shutdown behavior, also run `just stress-test`. It is separate from `just ci` because it is meant to uncover timeout and race conditions rather than gate every pull request.
 
 ## Documentation style
 

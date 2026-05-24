@@ -13,13 +13,15 @@ func testJobOutputStream() *jobOutputStream {
 func waitForOutputTail(t *testing.T, s *jobOutputStream, want string) outputTailResult {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	var tail outputTailResult
 	for time.Now().Before(deadline) {
 		tail = s.Tail(10)
 		if strings.Contains(tail.Text, want) {
 			return tail
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-ticker.C
 	}
 	t.Fatalf("output tail never contained %q; last tail %#v", want, tail)
 	return outputTailResult{}

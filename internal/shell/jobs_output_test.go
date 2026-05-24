@@ -50,6 +50,25 @@ func readTestJob(t *testing.T, r *Runner, jobID string, tailLines int) map[strin
 	return shellResultMap(t, read)
 }
 
+func waitForJobTail(t *testing.T, r *Runner, jobID string, tailLines int, want func(string) bool) string {
+	t.Helper()
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	var last string
+	for {
+		result := readTestJob(t, r, jobID, tailLines)
+		last, _ = result["stdout_tail"].(string)
+		if want(last) {
+			return last
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected job %s tail to match before deadline, last tail %q", jobID, last)
+		}
+		<-ticker.C
+	}
+}
+
 func TestJobReadReturnsLineTailForStdoutAndStderr(t *testing.T) {
 	r := jobOutputTestRunner(t, "printf 'out1\\nout2\\nout3\\n'; printf 'err1\\nerr2\\nerr3\\n' >&2", 5, 10000)
 	jobID := startTestJob(t, r)
@@ -73,29 +92,23 @@ func TestJobReadReturnsLineTailForStdoutAndStderr(t *testing.T) {
 func TestJobReadShowsCompleteLineWhileRunning(t *testing.T) {
 	r := jobOutputTestRunner(t, "printf 'first\\n'; sleep 2; printf 'second\\n'", 5, 10000)
 	jobID := startTestJob(t, r)
-	deadline := time.Now().Add(1500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		result := readTestJob(t, r, jobID, 10)
-		if got, _ := result["stdout_tail"].(string); strings.Contains(got, "first") {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
+	got := waitForJobTail(t, r, jobID, 10, func(tail string) bool {
+		return strings.Contains(tail, "first")
+	})
+	if !strings.Contains(got, "first") {
+		t.Fatalf("expected running job output to include first complete line, got %q", got)
 	}
-	t.Fatalf("expected running job output to include first complete line")
 }
 
 func TestJobReadShowsCurrentPartialLineWhileRunning(t *testing.T) {
 	r := jobOutputTestRunner(t, "printf partial; sleep 2; printf '\\n'", 5, 10000)
 	jobID := startTestJob(t, r)
-	deadline := time.Now().Add(1500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		result := readTestJob(t, r, jobID, 10)
-		if got, _ := result["stdout_tail"].(string); got == "partial" {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
+	got := waitForJobTail(t, r, jobID, 10, func(tail string) bool {
+		return tail == "partial"
+	})
+	if got != "partial" {
+		t.Fatalf("expected running job output to include current partial line, got %q", got)
 	}
-	t.Fatalf("expected running job output to include current partial line")
 }
 
 func TestJobReadFlushesPartialLineOnExit(t *testing.T) {
@@ -123,14 +136,7 @@ func TestJobReadFlushesPartialLineOnTimeout(t *testing.T) {
 func TestJobReadFlushesPartialLineOnCancel(t *testing.T) {
 	r := jobOutputTestRunner(t, "printf cancel-partial; sleep 5", 10, 10000)
 	jobID := startTestJob(t, r)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		result := readTestJob(t, r, jobID, 10)
-		if got, _ := result["stdout_tail"].(string); got == "cancel-partial" {
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+	waitForJobTail(t, r, jobID, 10, func(tail string) bool { return tail == "cancel-partial" })
 	if _, err := r.JobCancel(json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, jobID))); err != nil {
 		t.Fatalf("cancel job: %v", err)
 	}

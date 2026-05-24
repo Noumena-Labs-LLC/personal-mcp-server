@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,20 @@ import (
 	"testing"
 	"time"
 )
+
+func newLocalHTTPServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	var lc net.ListenConfig
+	listener, err := lc.Listen(context.Background(), "tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("local IPv4 bind unavailable in this environment: %v", err)
+	}
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = listener
+	server.Start()
+	t.Cleanup(server.Close)
+	return server
+}
 
 func TestLoadMCPClientConfigTokenOverride(t *testing.T) {
 	cfg, err := loadMCPClientConfig("", t.TempDir(), "http://127.0.0.1:3929/mcp", "override-token", time.Second)
@@ -83,7 +99,7 @@ func TestLoadMCPClientConfigRejectsRemoteURL(t *testing.T) {
 func TestMCPCLIClientPostsJSONRPC(t *testing.T) {
 	var gotAuth string
 	var gotMethod string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newLocalHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
