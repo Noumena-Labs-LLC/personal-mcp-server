@@ -164,6 +164,7 @@ type CommandEnvironmentConfig struct {
 	AllowedShells                        []string `toml:"allowed_shells" json:"allowed_shells,omitempty"`
 	PersistentShellPoolSize              int      `toml:"persistent_shell_pool_size" json:"persistent_shell_pool_size,omitempty"`
 	PersistentShellAcquireTimeoutSeconds int      `toml:"persistent_shell_acquire_timeout_seconds" json:"persistent_shell_acquire_timeout_seconds,omitempty"`
+	PersistentShellStartupTimeoutSeconds int      `toml:"persistent_shell_startup_timeout_seconds" json:"persistent_shell_startup_timeout_seconds,omitempty"`
 }
 
 type CommandPolicyConfig struct {
@@ -765,7 +766,10 @@ func (c *Config) Validate() error {
 	if c.CommandEnvironment.PersistentShellAcquireTimeoutSeconds == 0 {
 		c.CommandEnvironment.PersistentShellAcquireTimeoutSeconds = 6
 	}
-	if c.CommandEnvironment.PersistentShellPoolSize < 0 || c.CommandEnvironment.PersistentShellAcquireTimeoutSeconds < 0 {
+	if c.CommandEnvironment.PersistentShellStartupTimeoutSeconds == 0 {
+		c.CommandEnvironment.PersistentShellStartupTimeoutSeconds = 15
+	}
+	if c.CommandEnvironment.PersistentShellPoolSize < 0 || c.CommandEnvironment.PersistentShellAcquireTimeoutSeconds < 0 || c.CommandEnvironment.PersistentShellStartupTimeoutSeconds < 0 {
 		return errors.New("persistent shell pool settings cannot be negative")
 	}
 	if c.CommandEnvironment.PersistentShellPoolSize > 8 {

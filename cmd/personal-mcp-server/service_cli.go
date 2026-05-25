@@ -159,7 +159,7 @@ func serviceStop() error {
 func serviceRestart() error {
 	switch runtime.GOOS {
 	case "darwin":
-		if err := stopLaunchAgent(); err != nil {
+		if err := bootoutLaunchAgentIfLoaded(); err != nil {
 			fmt.Fprintf(os.Stderr, "launchctl stop warning: %v\n", err)
 		}
 		return startLaunchAgent()
@@ -575,6 +575,9 @@ func startLaunchAgent() error {
 	plistPath, err := launchAgentPath()
 	if err != nil {
 		return err
+	}
+	if _, err := captureServiceCommand("launchctl", "print", launchAgentServiceTarget()); err == nil {
+		return runServiceCommand("launchctl", "kickstart", "-k", launchAgentServiceTarget())
 	}
 	if err := runServiceCommand("launchctl", "bootstrap", launchAgentDomain(), plistPath); err != nil {
 		return err

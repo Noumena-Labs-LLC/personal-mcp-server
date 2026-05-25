@@ -330,7 +330,7 @@ func TestPersistentShellRunsWithZsh(t *testing.T) {
 	result := shellResultMap(t, out)
 	if got, _ := result["duration_ms"].(int64); got == 0 {
 		t.Fatalf("expected duration metadata, got %#v", result)
-	} else if got > (persistentShellStartupTimeout + time.Second).Milliseconds() {
+	} else if got > (15*time.Second + time.Second).Milliseconds() {
 		t.Fatalf("expected zsh startup result within startup timeout window, got %#v", result)
 	}
 	if failurePhase, _ := result["failure_phase"].(string); failurePhase != "" {
