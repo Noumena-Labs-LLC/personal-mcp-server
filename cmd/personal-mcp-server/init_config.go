@@ -2,18 +2,27 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/atomicfile"
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
+)
+
+var (
+	binarySHA256Once sync.Once
+	binarySHA256     string
 )
 
 func initConfig(args []string) {
@@ -307,7 +316,8 @@ allow_persistent_shell = false
 allowed_shells = ["/bin/zsh", "/bin/bash"]
 persistent_shell_pool_size = 2
 persistent_shell_acquire_timeout_seconds = 6
-persistent_shell_startup_timeout_seconds = 15
+persistent_shell_quiet_period_ms = 1000
+persistent_shell_startup_timeout_seconds = 30
 
 [command_policy]
 default = "deny"
@@ -423,6 +433,7 @@ func serverInfo(cfg *config.Config) map[string]any {
 	return map[string]any{
 		"name":           "personal-mcp-server",
 		"version":        version,
+		"binary_sha256":  runtimeBinarySHA256(),
 		"module":         "github.com/noumena-labs-llc/personal-mcp-server",
 		"transport":      "streamable_http",
 		"protocol":       "mcp",
@@ -460,4 +471,28 @@ func serverInfo(cfg *config.Config) map[string]any {
 			"very_slow_ms": cfg.ServerLogging.ToolVerySlowMS,
 		},
 	}
+}
+
+func runtimeBinarySHA256() string {
+	binarySHA256Once.Do(func() {
+		path, err := os.Executable()
+		if err != nil {
+			binarySHA256 = ""
+			return
+		}
+		file, err := os.Open(path) //nolint:gosec // hashes the current local executable selected by the runtime.
+		if err != nil {
+			binarySHA256 = ""
+			return
+		}
+		defer func() { _ = file.Close() }()
+
+		sum := sha256.New()
+		if _, err := io.Copy(sum, file); err != nil {
+			binarySHA256 = ""
+			return
+		}
+		binarySHA256 = hex.EncodeToString(sum.Sum(nil))
+	})
+	return binarySHA256
 }

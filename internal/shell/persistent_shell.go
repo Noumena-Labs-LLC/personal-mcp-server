@@ -7,21 +7,38 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
 )
 
+type persistentShellState int32
+
+const (
+	persistentShellStateNew persistentShellState = iota
+	persistentShellStateReady
+	persistentShellStateInUse
+	persistentShellStateDead
+)
+
 type persistentShell struct {
-	key     string
-	cmd     *exec.Cmd
-	pty     *os.File
-	runLock chan struct{}
+	key           string
+	cmd           *exec.Cmd
+	pty           *os.File
+	startupDir    string
+	startupMarker string
+	waitDone      chan struct{}
+	cleanupOnce   sync.Once
+	state         atomic.Int32
 }
 
 type persistentShellWriteError struct {
@@ -92,20 +109,37 @@ func removeEnv(env []string, key, value string) []string {
 	return out
 }
 
-func newPersistentShell(ctx context.Context, startupTimeout time.Duration, key, shellPath, cwd string, spec config.CommandSpec) (*persistentShell, error) {
+func (p *persistentShell) initialize(ctx context.Context, startupTimeout, quietPeriod time.Duration, key, shellPath, cwd string, spec config.CommandSpec) error {
 	startupCtx, cancel := persistentShellStartupContext(ctx, startupTimeout)
 	defer cancel()
+	started := time.Now()
 	master, slave, err := openPty()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	cmdCtx := ctx
-	if cmdCtx == nil {
-		cmdCtx = context.Background()
+	env := persistentShellEnv(spec)
+	startupDir := ""
+	startupMarker := ""
+	if isZshShell(shellPath) {
+		startupDir, startupMarker, err = prepareZshStartupWrapper(spec.StartupFiles)
+		if err != nil {
+			_ = master.Close()
+			_ = slave.Close()
+			return err
+		}
+		env = upsertEnv(env, "ZDOTDIR", startupDir)
+	} else if isBashShell(shellPath) {
+		startupDir, startupMarker, err = prepareBashStartupWrapper(spec.StartupFiles)
+		if err != nil {
+			_ = master.Close()
+			_ = slave.Close()
+			return err
+		}
+		env = upsertEnv(env, "HOME", startupDir)
 	}
-	cmd := exec.CommandContext(cmdCtx, shellPath, "-li") //nolint:gosec // shellPath is restricted by command_environment.allowed_shells and persistent shell mode is trusted-project opt-in.
+	cmd := exec.Command(shellPath, "-li") //nolint:gosec,noctx // shellPath is restricted by command_environment.allowed_shells and persistent shell mode is trusted-project opt-in; pooled shells must outlive the per-request context.
 	cmd.Dir = cwd
-	cmd.Env = persistentShellEnv(spec)
+	cmd.Env = env
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = slave
@@ -115,22 +149,92 @@ func newPersistentShell(ctx context.Context, startupTimeout time.Duration, key, 
 	if err := cmd.Start(); err != nil {
 		_ = master.Close()
 		_ = slave.Close()
-		return nil, err
+		if startupDir != "" {
+			_ = os.RemoveAll(startupDir)
+		}
+		return err
 	}
+	slog.DebugContext(startupCtx, "persistent shell process started",
+		"shell_session", key,
+		"shell", shellPath,
+		"cwd", cwd,
+		"startup_timeout_ms", startupTimeout.Milliseconds(),
+		"quiet_period_ms", quietPeriod.Milliseconds(),
+		"pid", cmd.Process.Pid,
+		"startup_wrapper", startupDir != "",
+	)
 	_ = slave.Close()
+	p.key = key
+	p.cmd = cmd
+	p.pty = master
+	p.startupDir = startupDir
+	p.startupMarker = startupMarker
+	p.waitDone = make(chan struct{})
+	go p.watchProcessExit()
 	if err := syscall.SetNonblock(int(master.Fd()), true); err != nil {
-		shell := newPersistentShellHandle(key, cmd, master)
-		shell.kill()
-		shell.waitAfterKill()
-		return nil, fmt.Errorf("set persistent shell PTY nonblocking: %w", err)
+		p.kill()
+		return fmt.Errorf("set persistent shell PTY nonblocking: %w", err)
 	}
-	shell := newPersistentShellHandle(key, cmd, master)
-	if err := shell.waitReady(startupCtx); err != nil {
-		shell.kill()
-		shell.waitAfterKill()
-		return nil, err
+	if err := p.waitReady(startupCtx, quietPeriod); err != nil {
+		slog.WarnContext(startupCtx, "persistent shell init failed",
+			"shell_session", key,
+			"shell", shellPath,
+			"cwd", cwd,
+			"duration_ms", time.Since(started).Milliseconds(),
+			"error", err.Error(),
+		)
+		p.kill()
+		return err
 	}
-	return shell, nil
+	slog.DebugContext(startupCtx, "persistent shell init completed",
+		"shell_session", key,
+		"shell", shellPath,
+		"cwd", cwd,
+		"duration_ms", time.Since(started).Milliseconds(),
+	)
+	p.setState(persistentShellStateReady)
+	return nil
+}
+
+func (p *persistentShell) watchProcessExit() {
+	if p == nil || p.cmd == nil {
+		return
+	}
+	pid := 0
+	if p.cmd.Process != nil {
+		pid = p.cmd.Process.Pid
+	}
+	waitErr := p.cmd.Wait()
+	stateBefore := p.currentState()
+	exitCode := 0
+	exited := false
+	success := false
+	if p.cmd.ProcessState != nil {
+		exitCode = p.cmd.ProcessState.ExitCode()
+		exited = p.cmd.ProcessState.Exited()
+		success = p.cmd.ProcessState.Success()
+	}
+	slog.Warn("persistent shell process exited",
+		"shell_session", p.key,
+		"pid", pid,
+		"wait_err", errorString(waitErr),
+		"state_before_dead", stateBefore,
+		"exited", exited,
+		"success", success,
+		"exit_code", exitCode,
+	)
+	p.setState(persistentShellStateDead)
+	p.cleanupStartupDir()
+	if p.waitDone != nil {
+		close(p.waitDone)
+	}
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func persistentShellStartupContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
@@ -148,33 +252,233 @@ func persistentShellStartupContext(parent context.Context, timeout time.Duration
 	return context.WithTimeout(parent, timeout)
 }
 
-func (p *persistentShell) waitReady(ctx context.Context) error {
-	_, _ = p.waitForQuiescence(ctx, 200*time.Millisecond, 8192)
-	sentinel := "__PERSONAL_MCP_READY_" + randomHex(12) + "__"
-	// Print the ready marker with the same framed format used for command
-	// completion, but keep the sentinel and status separated in the input text.
-	// Some PTYs echo shell input even after stty -echo is requested; splitting the
-	// printf arguments prevents echoed startup input from containing a valid
-	// sentinel:<digits> frame that could be mistaken for shell readiness.
-	if err := p.writeString(ctx, "stty -echo 2>/dev/null || true\nprintf '\n%s:%s\n' "+shellQuote(sentinel)+" 0\n"); err != nil {
-		return err
-	}
-	readyOutput, readyTruncated, readyExitCode, err := p.readUntilSentinel(ctx, sentinel, 8192)
-	_ = readyOutput
-	_ = readyTruncated
-	_ = readyExitCode
-	if err != nil {
-		preview := stripTerminalEscapes(readyOutput)
-		preview = strings.TrimSpace(preview)
-		if len(preview) > 240 {
-			preview = preview[:240]
+func (p *persistentShell) waitReady(ctx context.Context, quietPeriod time.Duration) error {
+	if p.startupMarker != "" {
+		markerStarted := time.Now()
+		readyOutput, readyTruncated, err := p.readUntilMarker(ctx, p.startupMarker, 8192)
+		slog.DebugContext(ctx, "persistent shell startup marker read completed",
+			"shell_session", p.key,
+			"duration_ms", time.Since(markerStarted).Milliseconds(),
+			"ready_marker", p.startupMarker,
+			"output_bytes", len(readyOutput),
+			"output_truncated", readyTruncated,
+			"output_preview", previewPersistentShellOutput(readyOutput),
+			"ok", err == nil,
+			"startup_wrapper", true,
+		)
+		if err != nil {
+			preview := previewPersistentShellOutput(readyOutput)
+			if preview != "" {
+				return fmt.Errorf("persistent shell startup marker not observed: %w; startup output=%q", err, preview)
+			}
+			return fmt.Errorf("persistent shell startup marker not observed: %w", err)
 		}
+		return nil
+	}
+
+	quiescenceStarted := time.Now()
+	quiescenceOutput, quiescenceErr := p.waitForQuiescence(ctx, quietPeriod, 8192)
+	slog.DebugContext(ctx, "persistent shell pre-marker quiescence completed",
+		"shell_session", p.key,
+		"duration_ms", time.Since(quiescenceStarted).Milliseconds(),
+		"quiet_period_ms", quietPeriod.Milliseconds(),
+		"output_bytes", len(quiescenceOutput),
+		"output_preview", previewPersistentShellOutput(quiescenceOutput),
+		"timed_out", errors.Is(quiescenceErr, context.DeadlineExceeded) || errors.Is(quiescenceErr, context.Canceled),
+	)
+	markerStarted := time.Now()
+	readyOutput, readyTruncated, readyMarker, probeCount, err := p.readUntilLatestReadyMarker(ctx, 8192)
+	slog.DebugContext(ctx, "persistent shell startup marker read completed",
+		"shell_session", p.key,
+		"duration_ms", time.Since(markerStarted).Milliseconds(),
+		"ready_marker", readyMarker,
+		"probe_count", probeCount,
+		"output_bytes", len(readyOutput),
+		"output_truncated", readyTruncated,
+		"output_preview", previewPersistentShellOutput(readyOutput),
+		"ok", err == nil,
+	)
+	if err != nil {
+		preview := previewPersistentShellOutput(readyOutput)
 		if preview != "" {
 			return fmt.Errorf("persistent shell startup marker not observed: %w; startup output=%q", err, preview)
 		}
 		return fmt.Errorf("persistent shell startup marker not observed: %w", err)
 	}
 	return nil
+}
+
+func (p *persistentShell) readUntilMarker(ctx context.Context, marker string, maxOutput int64) (output string, truncated bool, err error) {
+	var out limitBuffer
+	out.Limit = maxOutput
+
+	buf := make([]byte, 4096)
+	pending := make([]byte, 0, len(marker)+4096)
+	markerBytes := []byte(marker)
+	keepBytes := len(markerBytes) - 1
+	if keepBytes < 0 {
+		keepBytes = 0
+	}
+
+	flushPending := func() {
+		if maxOutput != 0 && len(pending) > 0 {
+			_, _ = out.Write(pending)
+		}
+		pending = pending[:0]
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			flushPending()
+			p.kill()
+			return out.String(), out.Truncated, ctx.Err()
+		default:
+		}
+
+		n, readErr := p.pty.Read(buf)
+		if n > 0 {
+			pending = append(pending, buf[:n]...)
+			if bytes.Contains(pending, []byte("Ignore insecure directories and files and continue")) {
+				if maxOutput != 0 {
+					_, _ = out.Write(pending)
+				}
+				return out.String(), out.Truncated, errors.New("persistent shell startup is waiting for zsh compinit confirmation about insecure directories; run compaudit/compinit fixups, disable compfix prompts, or use argv mode or a different shell")
+			}
+			if idx := bytes.Index(pending, markerBytes); idx >= 0 {
+				if maxOutput != 0 && idx > 0 {
+					_, _ = out.Write(pending[:idx])
+				}
+				return out.String(), out.Truncated, nil
+			}
+			if len(pending) > keepBytes {
+				flushLen := len(pending) - keepBytes
+				if maxOutput != 0 {
+					_, _ = out.Write(pending[:flushLen])
+				}
+				copy(pending, pending[flushLen:])
+				pending = pending[:keepBytes]
+			}
+		}
+		if readErr == nil {
+			continue
+		}
+		if errors.Is(readErr, syscall.EAGAIN) || errors.Is(readErr, syscall.EWOULDBLOCK) {
+			select {
+			case <-ctx.Done():
+				flushPending()
+				p.kill()
+				return out.String(), out.Truncated, ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+			}
+			continue
+		}
+		flushPending()
+		return out.String(), out.Truncated, readErr
+	}
+}
+
+func (p *persistentShell) readUntilLatestReadyMarker(ctx context.Context, maxOutput int64) (output string, truncated bool, marker string, probeCount int, err error) {
+	const readyPrefix = "__PERSONAL_MCP_READY__"
+	const probeInterval = time.Second
+
+	var out limitBuffer
+	out.Limit = maxOutput
+
+	buf := make([]byte, 4096)
+	pending := make([]byte, 0, 4096)
+	var latestMarker string
+	var latestMarkerBytes []byte
+	keepBytes := 0
+
+	flushPending := func() {
+		if maxOutput != 0 && len(pending) > 0 {
+			_, _ = out.Write(pending)
+		}
+		pending = pending[:0]
+	}
+	sendProbe := func() error {
+		readySuffix := randomHex(24)
+		latestMarker = readyPrefix + readySuffix
+		latestMarkerBytes = []byte(latestMarker)
+		keepBytes = len(latestMarkerBytes) - 1
+		if keepBytes < 0 {
+			keepBytes = 0
+		}
+		probeCount++
+		// Emit the ready marker as two independent printf arguments. Echoed shell
+		// input contains the quoted source strings, not the concatenated runtime
+		// marker, so startup only succeeds when the shell actually executes printf.
+		if err := p.writeString(ctx, "stty -echo 2>/dev/null || true\nprintf '\\n%s%s\\n' "+shellQuote(readyPrefix)+" "+shellQuote(readySuffix)+"\n"); err != nil {
+			return err
+		}
+		slog.DebugContext(ctx, "persistent shell startup marker sent",
+			"shell_session", p.key,
+			"ready_marker", latestMarker,
+			"probe_count", probeCount,
+		)
+		return nil
+	}
+	if err := sendProbe(); err != nil {
+		return out.String(), out.Truncated, latestMarker, probeCount, err
+	}
+	nextProbe := time.Now().Add(probeInterval)
+
+	for {
+		select {
+		case <-ctx.Done():
+			flushPending()
+			p.kill()
+			return out.String(), out.Truncated, latestMarker, probeCount, ctx.Err()
+		default:
+		}
+		if time.Now().After(nextProbe) || time.Now().Equal(nextProbe) {
+			if err := sendProbe(); err != nil {
+				return out.String(), out.Truncated, latestMarker, probeCount, err
+			}
+			nextProbe = time.Now().Add(probeInterval)
+		}
+
+		n, readErr := p.pty.Read(buf)
+		if n > 0 {
+			pending = append(pending, buf[:n]...)
+			if bytes.Contains(pending, []byte("Ignore insecure directories and files and continue")) {
+				if maxOutput != 0 {
+					_, _ = out.Write(pending)
+				}
+				return out.String(), out.Truncated, latestMarker, probeCount, errors.New("persistent shell startup is waiting for zsh compinit confirmation about insecure directories; run compaudit/compinit fixups, disable compfix prompts, or use argv mode or a different shell")
+			}
+			if idx := bytes.Index(pending, latestMarkerBytes); idx >= 0 {
+				if maxOutput != 0 && idx > 0 {
+					_, _ = out.Write(pending[:idx])
+				}
+				return out.String(), out.Truncated, latestMarker, probeCount, nil
+			}
+			if len(pending) > keepBytes {
+				flushLen := len(pending) - keepBytes
+				if maxOutput != 0 {
+					_, _ = out.Write(pending[:flushLen])
+				}
+				copy(pending, pending[flushLen:])
+				pending = pending[:keepBytes]
+			}
+		}
+		if readErr == nil {
+			continue
+		}
+		if errors.Is(readErr, syscall.EAGAIN) || errors.Is(readErr, syscall.EWOULDBLOCK) {
+			select {
+			case <-ctx.Done():
+				flushPending()
+				p.kill()
+				return out.String(), out.Truncated, latestMarker, probeCount, ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+			}
+			continue
+		}
+		flushPending()
+		return out.String(), out.Truncated, latestMarker, probeCount, readErr
+	}
 }
 
 func (p *persistentShell) waitForQuiescence(ctx context.Context, quietWindow time.Duration, maxOutput int64) (string, error) {
@@ -213,58 +517,39 @@ func (p *persistentShell) waitForQuiescence(ctx context.Context, quietWindow tim
 	}
 }
 
-func newPersistentShellHandle(key string, cmd *exec.Cmd, pty *os.File) *persistentShell {
-	return &persistentShell{key: key, cmd: cmd, pty: pty, runLock: make(chan struct{}, 1)}
+func newUninitializedPersistentShell(key string) *persistentShell {
+	shell := &persistentShell{key: key}
+	shell.setState(persistentShellStateNew)
+	return shell
 }
 
-func (p *persistentShell) lockRun(ctx context.Context) error {
-	select {
-	case p.runLock <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+func (p *persistentShell) setState(state persistentShellState) {
+	p.state.Store(int32(state))
 }
 
-func (p *persistentShell) tryLockRun() bool {
-	select {
-	case p.runLock <- struct{}{}:
-		return true
-	default:
-		return false
-	}
-}
-
-func (p *persistentShell) unlockRun() {
-	select {
-	case <-p.runLock:
-	default:
-	}
+func (p *persistentShell) currentState() persistentShellState {
+	return persistentShellState(p.state.Load())
 }
 
 func (p *persistentShell) run(ctx context.Context, cwd string, argv []string, maxOutput int64) (output string, truncated bool, exitCode int, err error) {
-	return p.runWithLockContext(ctx, ctx, cwd, argv, maxOutput)
+	return p.runUnlocked(ctx, cwd, argv, maxOutput)
 }
 
-func (p *persistentShell) runWithLockContext(lockCtx, runCtx context.Context, cwd string, argv []string, maxOutput int64) (output string, truncated bool, exitCode int, err error) {
-	if err := p.lockRun(lockCtx); err != nil {
-		return "", false, -1, persistentShellBusyError{err: err}
-	}
-	return p.runLocked(runCtx, cwd, argv, maxOutput)
-}
-
-func (p *persistentShell) runLocked(runCtx context.Context, cwd string, argv []string, maxOutput int64) (output string, truncated bool, exitCode int, err error) {
-	defer p.unlockRun()
-	if p.cmd.ProcessState != nil && p.cmd.ProcessState.Exited() {
+func (p *persistentShell) runUnlocked(runCtx context.Context, cwd string, argv []string, maxOutput int64) (output string, truncated bool, exitCode int, err error) {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil || p.currentState() == persistentShellStateDead {
 		return "", false, -1, errors.New("persistent shell already exited")
 	}
+	if p.waitDone != nil {
+		select {
+		case <-p.waitDone:
+			return "", false, -1, errors.New("persistent shell already exited")
+		default:
+		}
+	}
 	sentinel := "__PERSONAL_MCP_DONE_" + randomHex(12) + "__"
-	script := strings.Join([]string{
-		"cd " + shellQuote(cwd),
-		"__personal_mcp_server_status=$?",
-		"if [ \"$__personal_mcp_server_status\" -eq 0 ]; then " + shellQuoteJoin(argv) + "; __personal_mcp_server_status=$?; fi",
-		"printf '\\n" + sentinel + ":%s\\n' \"$__personal_mcp_server_status\"",
-	}, "\n") + "\n"
+	script := "(cd " + shellQuote(cwd) + " && " + shellQuoteJoin(argv) + "); " +
+		"__personal_mcp_server_status=$?; " +
+		"printf '\\n" + sentinel + ":%s\\n' \"$__personal_mcp_server_status\"\n"
 	if err := p.writeString(runCtx, script); err != nil {
 		return "", false, -1, persistentShellWriteError{err: err}
 	}
@@ -429,7 +714,13 @@ func (p *persistentShell) readUntilSentinel(ctx context.Context, sentinel string
 }
 
 func (p *persistentShell) kill() {
+	if p != nil {
+		p.setState(persistentShellStateDead)
+	}
 	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		if p != nil {
+			p.cleanupStartupDir()
+		}
 		return
 	}
 	if p.pty != nil {
@@ -437,25 +728,35 @@ func (p *persistentShell) kill() {
 	}
 	if runtime.GOOS == "windows" {
 		_ = p.cmd.Process.Kill()
+		p.waitForExit()
 		return
 	}
 	_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 	_ = p.cmd.Process.Kill()
+	p.waitForExit()
 }
 
-func (p *persistentShell) waitAfterKill() {
-	if p == nil || p.cmd == nil {
+func (p *persistentShell) waitForExit() {
+	if p == nil || p.waitDone == nil {
+		p.cleanupStartupDir()
 		return
 	}
-	done := make(chan struct{})
-	go func() {
-		_ = p.cmd.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
+	case <-p.waitDone:
 	case <-time.After(2 * time.Second):
 	}
+}
+
+func (p *persistentShell) cleanupStartupDir() {
+	if p == nil {
+		return
+	}
+	p.cleanupOnce.Do(func() {
+		if p.startupDir != "" {
+			_ = os.RemoveAll(p.startupDir)
+			p.startupDir = ""
+		}
+	})
 }
 
 func randomHex(n int) string {
@@ -464,4 +765,84 @@ func randomHex(n int) string {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+func previewPersistentShellOutput(output string) string {
+	const maxLen = 240
+	preview := stripTerminalEscapes(output)
+	preview = strings.TrimSpace(preview)
+	if len(preview) > maxLen {
+		preview = preview[:maxLen]
+	}
+	return preview
+}
+
+func isZshShell(shellPath string) bool {
+	return filepath.Base(shellPath) == "zsh"
+}
+
+func isBashShell(shellPath string) bool {
+	return filepath.Base(shellPath) == "bash"
+}
+
+func prepareZshStartupWrapper(startupFiles []string) (dir, marker string, err error) {
+	dir, err = os.MkdirTemp("", "personal-mcp-zdotdir-*")
+	if err != nil {
+		return "", "", err
+	}
+	marker = "__PERSONAL_MCP_READY__" + randomHex(24)
+	files := map[string]string{
+		".zshenv":   "",
+		".zprofile": "",
+		".zshrc":    "",
+		".zlogin":   strings.Join(append(startupSourceLines(startupFiles), `printf '\n%s\n' `+shellQuote(marker), ""), "\n"),
+	}
+	for name, body := range files {
+		if writeErr := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); writeErr != nil {
+			_ = os.RemoveAll(dir)
+			return "", "", writeErr
+		}
+	}
+	return dir, marker, nil
+}
+
+func prepareBashStartupWrapper(startupFiles []string) (dir, marker string, err error) {
+	dir, err = os.MkdirTemp("", "personal-mcp-bash-home-*")
+	if err != nil {
+		return "", "", err
+	}
+	marker = "__PERSONAL_MCP_READY__" + randomHex(24)
+	files := map[string]string{
+		".bash_profile": strings.Join(append(startupSourceLines(startupFiles), `printf '\n%s\n' `+shellQuote(marker), ""), "\n"),
+		".bashrc":       "",
+	}
+	for name, body := range files {
+		if writeErr := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); writeErr != nil {
+			_ = os.RemoveAll(dir)
+			return "", "", writeErr
+		}
+	}
+	return dir, marker, nil
+}
+
+func startupSourceLines(startupFiles []string) []string {
+	lines := make([]string, 0, len(startupFiles))
+	for _, file := range startupFiles {
+		resolved := resolveStartupFilePath(file)
+		lines = append(lines, `[[ -r `+shellQuote(resolved)+` ]] && source `+shellQuote(resolved))
+	}
+	return lines
+}
+
+func resolveStartupFilePath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if strings.HasPrefix(trimmed, "~/") || trimmed == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			if trimmed == "~" {
+				return home
+			}
+			return filepath.Join(home, strings.TrimPrefix(trimmed, "~/"))
+		}
+	}
+	return trimmed
 }

@@ -43,6 +43,10 @@ type commandJob struct {
 	Active bool
 }
 
+// TODO: Audit the jobs locking model. The split between Runner.jobMu and
+// commandJob.mu has grown organically and should be reviewed for clearer
+// ownership boundaries and invariants.
+
 type StartNamedResult struct {
 	JobID     string `json:"job_id"`
 	Name      string `json:"name"`

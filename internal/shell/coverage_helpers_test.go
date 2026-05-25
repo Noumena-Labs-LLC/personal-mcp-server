@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/fsx"
@@ -181,8 +182,26 @@ func TestOutputAndPersistentShellErrorHelpers(t *testing.T) {
 	}
 	var p *persistentShell
 	p.kill()
-	p.waitAfterKill()
 	if got := randomHex(4); len(got) != 8 {
 		t.Fatalf("randomHex length = %d, want 8", len(got))
+	}
+}
+
+func TestPersistentShellStartupTimeoutDefaultsAndOverride(t *testing.T) {
+	r := NewRunner(&config.Config{}, nil, nil, nil)
+	if got := r.persistentShellStartupTimeout(); got != 30*time.Second {
+		t.Fatalf("persistentShellStartupTimeout default = %s, want %s", got, 30*time.Second)
+	}
+	if got := r.persistentShellQuietPeriod(); got != time.Second {
+		t.Fatalf("persistentShellQuietPeriod default = %s, want %s", got, time.Second)
+	}
+
+	r.Cfg.CommandEnvironment.PersistentShellStartupTimeoutSeconds = 9
+	if got := r.persistentShellStartupTimeout(); got != 9*time.Second {
+		t.Fatalf("persistentShellStartupTimeout override = %s, want %s", got, 9*time.Second)
+	}
+	r.Cfg.CommandEnvironment.PersistentShellQuietPeriodMs = 1500
+	if got := r.persistentShellQuietPeriod(); got != 1500*time.Millisecond {
+		t.Fatalf("persistentShellQuietPeriod override = %s, want %s", got, 1500*time.Millisecond)
 	}
 }

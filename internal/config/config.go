@@ -165,6 +165,8 @@ type CommandEnvironmentConfig struct {
 	PersistentShellPoolSize              int      `toml:"persistent_shell_pool_size" json:"persistent_shell_pool_size,omitempty"`
 	PersistentShellAcquireTimeoutSeconds int      `toml:"persistent_shell_acquire_timeout_seconds" json:"persistent_shell_acquire_timeout_seconds,omitempty"`
 	PersistentShellStartupTimeoutSeconds int      `toml:"persistent_shell_startup_timeout_seconds" json:"persistent_shell_startup_timeout_seconds,omitempty"`
+	PersistentShellQuietPeriodMs         int      `toml:"persistent_shell_quiet_period_ms" json:"persistent_shell_quiet_period_ms,omitempty"`
+	StartupFiles                         []string `toml:"startup_files" json:"startup_files,omitempty"`
 }
 
 type CommandPolicyConfig struct {
@@ -222,6 +224,7 @@ type CommandSpec struct {
 	ExtraArgs      []ExtraArgRule    `toml:"extra_args"`
 	RunMode        string            `toml:"run_mode" json:"run_mode,omitempty"`
 	Shell          string            `toml:"shell" json:"shell,omitempty"`
+	StartupFiles   []string          `toml:"startup_files" json:"startup_files,omitempty"`
 	Cwd            string            `toml:"cwd" json:"cwd,omitempty"`
 }
 
@@ -767,9 +770,12 @@ func (c *Config) Validate() error {
 		c.CommandEnvironment.PersistentShellAcquireTimeoutSeconds = 6
 	}
 	if c.CommandEnvironment.PersistentShellStartupTimeoutSeconds == 0 {
-		c.CommandEnvironment.PersistentShellStartupTimeoutSeconds = 15
+		c.CommandEnvironment.PersistentShellStartupTimeoutSeconds = 30
 	}
-	if c.CommandEnvironment.PersistentShellPoolSize < 0 || c.CommandEnvironment.PersistentShellAcquireTimeoutSeconds < 0 || c.CommandEnvironment.PersistentShellStartupTimeoutSeconds < 0 {
+	if c.CommandEnvironment.PersistentShellQuietPeriodMs == 0 {
+		c.CommandEnvironment.PersistentShellQuietPeriodMs = 1000
+	}
+	if c.CommandEnvironment.PersistentShellPoolSize < 0 || c.CommandEnvironment.PersistentShellAcquireTimeoutSeconds < 0 || c.CommandEnvironment.PersistentShellStartupTimeoutSeconds < 0 || c.CommandEnvironment.PersistentShellQuietPeriodMs < 0 {
 		return errors.New("persistent shell pool settings cannot be negative")
 	}
 	if c.CommandEnvironment.PersistentShellPoolSize > 8 {
@@ -1124,6 +1130,17 @@ func validateCommandSpec(cmd CommandSpec) error {
 	}
 	if cmd.RunMode == "persistent_shell" && strings.TrimSpace(cmd.Shell) == "" {
 		return fmt.Errorf("command %q run_mode persistent_shell requires shell", cmd.Name)
+	}
+	for _, file := range cmd.StartupFiles {
+		if strings.TrimSpace(file) == "" {
+			return fmt.Errorf("command %q startup_files cannot contain empty paths", cmd.Name)
+		}
+	}
+	if cmd.RunMode == "persistent_shell" {
+		shellBase := filepath.Base(strings.TrimSpace(cmd.Shell))
+		if (shellBase == "bash" || shellBase == "zsh") && len(cmd.StartupFiles) == 0 {
+			return fmt.Errorf("command %q run_mode persistent_shell with %s requires startup_files", cmd.Name, shellBase)
+		}
 	}
 	if strings.Contains(cmd.Cwd, "\x00") {
 		return fmt.Errorf("command %q cwd contains NUL", cmd.Name)

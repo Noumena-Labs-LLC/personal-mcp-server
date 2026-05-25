@@ -182,3 +182,57 @@ name = "demo"
 		t.Fatalf("saved trust store did not reload as trusted: %#v", state)
 	}
 }
+
+func TestLoadRejectsPersistentShellBashWithoutStartupFiles(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, DefaultFilename)
+	body := `config_kind = "project"
+config_version = 1
+
+[project]
+name = "demo"
+
+[command_environment]
+run_mode = "persistent_shell"
+shell = "/bin/bash"
+
+[[commands]]
+name = "pytest"
+exec = "python3"
+args = ["-m", "pytest"]
+`
+	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(configPath)
+	if err == nil || err.Error() != `project command "pytest" run_mode persistent_shell with bash requires startup_files` {
+		t.Fatalf("expected bash startup_files validation error, got %v", err)
+	}
+}
+
+func TestLoadRejectsPersistentShellZshWithoutStartupFiles(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, DefaultFilename)
+	body := `config_kind = "project"
+config_version = 1
+
+[project]
+name = "demo"
+
+[command_environment]
+run_mode = "persistent_shell"
+shell = "/bin/zsh"
+
+[[commands]]
+name = "pytest"
+exec = "python3"
+args = ["-m", "pytest"]
+`
+	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(configPath)
+	if err == nil || err.Error() != `project command "pytest" run_mode persistent_shell with zsh requires startup_files` {
+		t.Fatalf("expected zsh startup_files validation error, got %v", err)
+	}
+}

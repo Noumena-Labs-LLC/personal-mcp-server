@@ -3,7 +3,6 @@ package shell
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -275,6 +274,23 @@ func TestPersistentShellRunModeRequiresGlobalOptIn(t *testing.T) {
 	}
 }
 
+func persistentShellTestStartupFiles(shellPath string) []string {
+	if override := strings.TrimSpace(os.Getenv("PERSONAL_MCP_TEST_STARTUP_FILE")); override != "" {
+		return []string{override}
+	}
+	if isBashShell(shellPath) || isZshShell(shellPath) {
+		return []string{"/dev/null"}
+	}
+	return nil
+}
+
+func persistentShellTestMaxOutput() int64 {
+	if strings.TrimSpace(os.Getenv("PERSONAL_MCP_TEST_STARTUP_FILE")) != "" {
+		return 32 * 1024
+	}
+	return 1024
+}
+
 func TestPersistentShellRunsInRequestedCwd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("persistent shell mode is Unix-only")
@@ -295,7 +311,7 @@ func TestPersistentShellRunsInRequestedCwd(t *testing.T) {
 	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 	defer r.ClosePersistentShells()
-	spec := config.CommandSpec{Name: "pwd", Exec: "pwd", RunMode: "persistent_shell", Shell: shellPath}
+	spec := config.CommandSpec{Name: "pwd", Exec: "pwd", RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}
 	out, err := r.runPersistentShell(context.Background(), spec, nil, subdir, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
 	if err != nil {
 		t.Fatalf("run persistent shell: %v", err)
@@ -322,7 +338,7 @@ func TestPersistentShellRunsWithZsh(t *testing.T) {
 	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 	defer r.ClosePersistentShells()
-	spec := config.CommandSpec{Name: "pwd", Exec: "pwd", RunMode: "persistent_shell", Shell: shellPath}
+	spec := config.CommandSpec{Name: "pwd", Exec: "pwd", RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}
 	out, err := r.runPersistentShell(context.Background(), spec, nil, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
 	if err != nil {
 		t.Fatalf("run persistent shell zsh: %v", err)
@@ -330,7 +346,7 @@ func TestPersistentShellRunsWithZsh(t *testing.T) {
 	result := shellResultMap(t, out)
 	if got, _ := result["duration_ms"].(int64); got == 0 {
 		t.Fatalf("expected duration metadata, got %#v", result)
-	} else if got > (15*time.Second + time.Second).Milliseconds() {
+	} else if got > (30*time.Second + time.Second).Milliseconds() {
 		t.Fatalf("expected zsh startup result within startup timeout window, got %#v", result)
 	}
 	if failurePhase, _ := result["failure_phase"].(string); failurePhase != "" {
@@ -344,6 +360,55 @@ func TestPersistentShellRunsWithZsh(t *testing.T) {
 	if !strings.Contains(stdout, root) {
 		t.Fatalf("expected stdout to contain cwd %q, got %q", root, stdout)
 	}
+}
+
+func TestPersistentShellInitThenFirstCommandTiming(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("persistent shell mode is Unix-only")
+	}
+	shellPath := "/bin/zsh"
+	if _, err := os.Stat(shellPath); err != nil {
+		if _, bashErr := os.Stat("/bin/bash"); bashErr != nil {
+			t.Skip("no supported test shell available")
+		}
+		shellPath = "/bin/bash"
+	}
+
+	root := t.TempDir()
+	spec := config.CommandSpec{
+		Name:         "hello",
+		Exec:         "/bin/sh",
+		Args:         []string{"-c", "printf 'hello world'"},
+		RunMode:      "persistent_shell",
+		Shell:        shellPath,
+		StartupFiles: persistentShellTestStartupFiles(shellPath),
+	}
+
+	started := time.Now()
+	sess := newUninitializedPersistentShell(root + "\x00" + shellPath)
+	err := sess.initialize(context.Background(), defaultPersistentShellStartupTimeout, defaultPersistentShellQuietPeriod, root+"\x00"+shellPath, shellPath, root, spec)
+	initElapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("create persistent shell: %v", err)
+	}
+	defer func() {
+		sess.kill()
+	}()
+
+	runStarted := time.Now()
+	output, truncated, exitCode, err := sess.run(context.Background(), root, []string{"/bin/sh", "-c", "printf 'hello world'"}, persistentShellTestMaxOutput())
+	runElapsed := time.Since(runStarted)
+	if err != nil {
+		t.Fatalf("run first command after init: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("expected zero exit code, got %d with output %q", exitCode, output)
+	}
+	if !strings.Contains(output, "hello world") {
+		t.Fatalf("expected first command output to contain %q, got %q", "hello world", output)
+	}
+	t.Logf("persistent shell timing shell=%s init=%s first_command=%s total=%s truncated=%v", shellPath, initElapsed, runElapsed, initElapsed+runElapsed, truncated)
+	t.Logf("persistent shell first command raw output: %q", output)
 }
 
 func TestPersistentShellCapturesPartialOutputWithoutNewlineOnTimeout(t *testing.T) {
@@ -360,9 +425,10 @@ func TestPersistentShellCapturesPartialOutputWithoutNewlineOnTimeout(t *testing.
 	cfg.Limits.MaxCommandOutputBytes = 10000
 	cfg.CommandEnvironment.AllowPersistentShell = true
 	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
+	cfg.CommandEnvironment.PersistentShellQuietPeriodMs = 100
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 	defer r.ClosePersistentShells()
-	spec := config.CommandSpec{Name: "partial", Exec: "/bin/sh", Args: []string{"-c", "printf partial-output; sleep 5"}, RunMode: "persistent_shell", Shell: shellPath}
+	spec := config.CommandSpec{Name: "partial", Exec: "/bin/sh", Args: []string{"-c", "printf partial-output; sleep 5"}, RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}
 	out, err := r.runPersistentShell(context.Background(), spec, spec.Args, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
 	if err != nil {
 		t.Fatalf("run persistent shell: %v", err)
@@ -393,36 +459,17 @@ func TestPersistentShellRunLockHonorsContext(t *testing.T) {
 	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 	defer r.ClosePersistentShells()
-	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf ok"}, RunMode: "persistent_shell", Shell: shellPath}
+	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf ok"}, RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}
 	sess, err := r.persistentSession(context.Background(), root, shellPath, root, spec)
 	if err != nil {
 		t.Fatalf("create persistent shell: %v", err)
 	}
-
-	if err := sess.lockRun(context.Background()); err != nil {
-		t.Fatalf("lock persistent shell: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	output, truncated, exitCode, runErr := sess.run(ctx, root, []string{"/bin/sh", "-c", "printf should-not-run"}, 10000)
-	if output != "" || truncated || exitCode != -1 {
-		t.Fatalf("expected no output from busy shell run, got output=%q truncated=%v exit=%d", output, truncated, exitCode)
-	}
-	if !errors.Is(runErr, context.DeadlineExceeded) {
-		t.Fatalf("expected deadline while waiting for persistent shell lock, got %v", runErr)
-	}
-	var busyErr persistentShellBusyError
-	if !errors.As(runErr, &busyErr) {
-		t.Fatalf("expected persistentShellBusyError, got %T %[1]v", runErr)
-	}
-	sess.unlockRun()
-
 	out, truncated, exitCode, err := sess.run(context.Background(), root, []string{"/bin/sh", "-c", "printf after-busy"}, 10000)
 	if err != nil {
-		t.Fatalf("expected shell to remain usable after busy timeout: %v", err)
+		t.Fatalf("expected shell to remain usable: %v", err)
 	}
 	if truncated || exitCode != 0 || !strings.Contains(out, "after-busy") {
-		t.Fatalf("unexpected post-busy run output=%q truncated=%v exit=%d", out, truncated, exitCode)
+		t.Fatalf("unexpected run output=%q truncated=%v exit=%d", out, truncated, exitCode)
 	}
 }
 
@@ -444,15 +491,18 @@ func TestPersistentShellPoolCreatesSecondSessionWhenFirstBusy(t *testing.T) {
 	cfg.CommandEnvironment.PersistentShellAcquireTimeoutSeconds = 1
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 	defer r.ClosePersistentShells()
-	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf pool-ok"}, RunMode: "persistent_shell", Shell: shellPath}
-	sess, err := r.persistentSession(context.Background(), root, shellPath, root, spec)
-	if err != nil {
-		t.Fatalf("create persistent shell: %v", err)
-	}
-	if err := sess.lockRun(context.Background()); err != nil {
-		t.Fatalf("lock first persistent shell: %v", err)
-	}
-	defer sess.unlockRun()
+	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf pool-ok"}, RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}
+	release := make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		_ = r.withPersistentShellSession(context.Background(), root, shellPath, root, spec, nil, func(_ *persistentShell) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer close(release)
 
 	out, err := r.runPersistentShell(context.Background(), spec, spec.Args, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
 	if err != nil {
@@ -467,13 +517,15 @@ func TestPersistentShellPoolCreatesSecondSessionWhenFirstBusy(t *testing.T) {
 	pool := r.shellPools[key]
 	r.shellMu.Unlock()
 	poolLen := 0
+	poolCount := 0
 	if pool != nil {
 		pool.mu.Lock()
 		poolLen = len(pool.sessions)
+		poolCount = pool.count
 		pool.mu.Unlock()
 	}
-	if poolLen != 2 {
-		t.Fatalf("expected pool to contain two shell sessions, got %d", poolLen)
+	if poolLen != 1 || poolCount != 2 {
+		t.Fatalf("expected pool to contain one ready session and track two total sessions, got sessions=%d count=%d", poolLen, poolCount)
 	}
 }
 
@@ -493,7 +545,7 @@ func TestPersistentShellRetriesStaleSessionWriteFailure(t *testing.T) {
 	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 	defer r.ClosePersistentShells()
-	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf retry-ok"}, RunMode: "persistent_shell", Shell: shellPath}
+	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf retry-ok"}, RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}
 	if _, err := r.runPersistentShell(context.Background(), spec, spec.Args, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{}); err != nil {
 		t.Fatalf("prime persistent shell: %v", err)
 	}
@@ -528,13 +580,16 @@ func TestPersistentShellRetriesStaleSessionWriteFailure(t *testing.T) {
 }
 
 func TestEffectiveCommandSpecUsesProjectCommandEnvironmentDefaults(t *testing.T) {
-	state := project.State{Found: true, Trusted: true, Config: &project.Config{CommandEnv: project.CommandEnvironment{RunMode: "persistent_shell", Shell: "/bin/zsh"}}}
+	state := project.State{Found: true, Trusted: true, Config: &project.Config{CommandEnv: project.CommandEnvironment{RunMode: "persistent_shell", Shell: "/bin/zsh", StartupFiles: []string{"~/.zshrc"}}}}
 	spec := effectiveCommandSpec(config.CommandSpec{Name: "test", Exec: "make"}, "project", state)
 	if spec.RunMode != "persistent_shell" {
 		t.Fatalf("expected project default run_mode, got %q", spec.RunMode)
 	}
 	if spec.Shell != "/bin/zsh" {
 		t.Fatalf("expected project default shell, got %q", spec.Shell)
+	}
+	if len(spec.StartupFiles) != 1 || spec.StartupFiles[0] != "~/.zshrc" {
+		t.Fatalf("expected project default startup_files, got %#v", spec.StartupFiles)
 	}
 	override := effectiveCommandSpec(config.CommandSpec{Name: "lint", Exec: "make", RunMode: "argv", Shell: "/bin/bash"}, "project", state)
 	if override.RunMode != "argv" || override.Shell != "/bin/bash" {

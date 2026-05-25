@@ -440,6 +440,7 @@ name = "stress-project"
 [command_environment]
 run_mode = "persistent_shell"
 shell = %q
+startup_files = ["/dev/null"]
 
 [[commands]]
 name = "pool-slow"

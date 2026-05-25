@@ -248,6 +248,17 @@ func TestDoctorAndServiceCommands(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PERSONAL_MCP_ROOT", root)
 	t.Setenv("PERSONAL_MCP_TOKEN", "test-token")
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	if runtime.GOOS == "darwin" {
+		if err := os.MkdirAll(filepath.Join(home, "Library", "LaunchAgents"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(home, ".config"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	configPath := writeStarterConfigFile(t, root)
 	binaryDir := filepath.Join(root, "bin")
@@ -267,6 +278,11 @@ exit 2
 	spec, err := loadServiceSpec(fakeBinary, configPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "darwin" {
+		if got := assertLaunchAgentPathUnderHome(t, home); got != spec.Platforms["darwin"].ManifestPath {
+			t.Fatalf("launchAgentPath = %q, want %q", got, spec.Platforms["darwin"].ManifestPath)
+		}
 	}
 	manifestPath := spec.Platforms[runtime.GOOS].ManifestPath
 	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {

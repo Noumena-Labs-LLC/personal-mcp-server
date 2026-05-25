@@ -177,6 +177,7 @@ name = "integration-pool"
 [command_environment]
 run_mode = "persistent_shell"
 shell = "/bin/bash"
+startup_files = ["/dev/null"]
 
 [[commands]]
 name = "pool-slow"

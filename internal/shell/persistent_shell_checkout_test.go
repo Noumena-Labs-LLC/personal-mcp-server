@@ -17,6 +17,24 @@ import (
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/project"
 )
 
+func runPersistentShellCommandWithPID(ctx context.Context, t *testing.T, r *Runner, root, shellPath string, spec config.CommandSpec, argv []string) (pid int, stdout string, exitCode int, err error) {
+	t.Helper()
+
+	var truncated bool
+	err = r.withPersistentShellSession(ctx, root, shellPath, root, spec, func(sess *persistentShell) {
+		if sess != nil && sess.cmd != nil && sess.cmd.Process != nil {
+			pid = sess.cmd.Process.Pid
+		}
+	}, func(sess *persistentShell) error {
+		stdout, truncated, exitCode, err = sess.runUnlocked(ctx, root, argv, r.Cfg.Limits.MaxCommandOutputBytes)
+		return err
+	})
+	if truncated {
+		t.Fatalf("unexpected truncated output for argv=%q", argv)
+	}
+	return pid, stdout, exitCode, err
+}
+
 func requirePersistentShellTestShell(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -40,11 +58,11 @@ func persistentShellCheckoutTestRunner(t *testing.T, root, shellPath string, poo
 	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
 	cfg.CommandEnvironment.PersistentShellPoolSize = poolSize
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
-	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf ok"}, RunMode: "persistent_shell", Shell: shellPath}
+	spec := config.CommandSpec{Name: "echo", Exec: "/bin/sh", Args: []string{"-c", "printf ok"}, RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}
 	return r, spec
 }
 
-func shellPoolSnapshot(r *Runner, key string) (sessions, starting int) {
+func shellPoolSnapshot(r *Runner, key string) (sessions, count int) {
 	r.shellMu.Lock()
 	pool := r.shellPools[key]
 	r.shellMu.Unlock()
@@ -53,7 +71,7 @@ func shellPoolSnapshot(r *Runner, key string) (sessions, starting int) {
 	}
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	return len(pool.sessions), pool.starting
+	return len(pool.sessions), pool.count
 }
 
 func TestPersistentShellRunReturnsBusyImmediatelyWhenPoolFull(t *testing.T) {
@@ -62,14 +80,17 @@ func TestPersistentShellRunReturnsBusyImmediatelyWhenPoolFull(t *testing.T) {
 	r, spec := persistentShellCheckoutTestRunner(t, root, shellPath, 1)
 	defer r.ClosePersistentShells()
 
-	sess, err := r.persistentSession(context.Background(), root, shellPath, root, spec)
-	if err != nil {
-		t.Fatalf("create persistent shell: %v", err)
-	}
-	if err := sess.lockRun(context.Background()); err != nil {
-		t.Fatalf("lock persistent shell: %v", err)
-	}
-	defer sess.unlockRun()
+	release := make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		_ = r.withPersistentShellSession(context.Background(), root, shellPath, root, spec, nil, func(_ *persistentShell) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer close(release)
 
 	started := time.Now()
 	out, err := r.runPersistentShell(context.Background(), spec, spec.Args, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
@@ -98,17 +119,17 @@ func TestPersistentShellRunReturnsBusyImmediatelyWhenPoolFull(t *testing.T) {
 func TestPersistentShellCheckoutReturnsBusyWhenStartupSlotReserved(t *testing.T) {
 	shellPath := requirePersistentShellTestShell(t)
 	root := t.TempDir()
-	r, spec := persistentShellCheckoutTestRunner(t, root, shellPath, 1)
+	r, _ := persistentShellCheckoutTestRunner(t, root, shellPath, 1)
 	defer r.ClosePersistentShells()
 
 	key := root + "\x00" + shellPath
-	pool := r.persistentPool(key)
+	pool := r.ensurePersistentPool(key)
 	pool.mu.Lock()
-	pool.starting = 1
+	pool.count = 1
 	pool.mu.Unlock()
 
 	started := time.Now()
-	sess, err := r.checkoutPersistentSession(context.Background(), root, shellPath, root, spec)
+	sess, err := r.checkoutPersistentSession(key)
 	elapsed := time.Since(started)
 	if sess != nil {
 		t.Fatalf("expected no session when startup slot fills pool")
@@ -119,9 +140,9 @@ func TestPersistentShellCheckoutReturnsBusyWhenStartupSlotReserved(t *testing.T)
 	if elapsed > 100*time.Millisecond {
 		t.Fatalf("reserved startup slot should return busy without waiting, took %s", elapsed)
 	}
-	sessions, starting := shellPoolSnapshot(r, key)
-	if sessions != 0 || starting != 1 {
-		t.Fatalf("busy checkout should not mutate reserved slot; sessions=%d starting=%d", sessions, starting)
+	sessions, count := shellPoolSnapshot(r, key)
+	if sessions != 0 || count != 1 {
+		t.Fatalf("busy checkout should not mutate reserved slot; sessions=%d count=%d", sessions, count)
 	}
 }
 
@@ -145,9 +166,9 @@ func TestPersistentShellInitFailureCleansReservedSlot(t *testing.T) {
 	}
 
 	key := root + "\x00" + shellPath
-	sessions, starting := shellPoolSnapshot(r, key)
-	if sessions != 0 || starting != 0 {
-		t.Fatalf("failed init should clean pool slot; sessions=%d starting=%d", sessions, starting)
+	sessions, count := shellPoolSnapshot(r, key)
+	if sessions != 0 || count != 0 {
+		t.Fatalf("failed init should clean pool slot; sessions=%d count=%d", sessions, count)
 	}
 
 	if err := os.MkdirAll(missingCwd, 0o750); err != nil {
@@ -162,6 +183,135 @@ func TestPersistentShellInitFailureCleansReservedSlot(t *testing.T) {
 	}
 }
 
+func TestPersistentShellReusesReadySessionForSequentialRuns(t *testing.T) {
+	shellPath := requirePersistentShellTestShell(t)
+	root := t.TempDir()
+	r, spec := persistentShellCheckoutTestRunner(t, root, shellPath, 2)
+	defer r.ClosePersistentShells()
+
+	argv := []string{"/bin/sh", "-c", "printf reused-ok"}
+	pid1, stdout1, exit1, err := runPersistentShellCommandWithPID(context.Background(), t, r, root, shellPath, spec, argv)
+	if err != nil {
+		t.Fatalf("first persistent-shell run: %v", err)
+	}
+	if exit1 != 0 || !strings.Contains(stdout1, "reused-ok") {
+		t.Fatalf("unexpected first run stdout=%q exit=%d", stdout1, exit1)
+	}
+
+	pid2, stdout2, exit2, err := runPersistentShellCommandWithPID(context.Background(), t, r, root, shellPath, spec, argv)
+	if err != nil {
+		t.Fatalf("second persistent-shell run: %v", err)
+	}
+	if exit2 != 0 || !strings.Contains(stdout2, "reused-ok") {
+		t.Fatalf("unexpected second run stdout=%q exit=%d", stdout2, exit2)
+	}
+	if pid1 == 0 || pid2 == 0 {
+		t.Fatalf("expected shell pids, got pid1=%d pid2=%d", pid1, pid2)
+	}
+	if pid1 != pid2 {
+		t.Fatalf("expected second run to reuse the same shell, got pid1=%d pid2=%d", pid1, pid2)
+	}
+
+	sessions, count := shellPoolSnapshot(r, root+"\x00"+shellPath)
+	if sessions != 1 || count != 1 {
+		t.Fatalf("expected one ready shell reused in pool; sessions=%d count=%d", sessions, count)
+	}
+}
+
+func TestPersistentShellTimeoutDropsSessionAndCreatesReplacement(t *testing.T) {
+	shellPath := requirePersistentShellTestShell(t)
+	root := t.TempDir()
+	r, spec := persistentShellCheckoutTestRunner(t, root, shellPath, 2)
+	defer r.ClosePersistentShells()
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	pid1, stdout1, exit1, err := runPersistentShellCommandWithPID(timeoutCtx, t, r, root, shellPath, spec, []string{"/bin/sh", "-c", "printf timeout-partial; sleep 5"})
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if !strings.Contains(stdout1, "timeout-partial") {
+		t.Fatalf("expected partial stdout on timeout, got %q", stdout1)
+	}
+	if exit1 != -1 {
+		t.Fatalf("expected unset exit code on timeout, got %d", exit1)
+	}
+	if pid1 == 0 {
+		t.Fatal("expected first shell pid on timeout run")
+	}
+
+	sessions, count := shellPoolSnapshot(r, root+"\x00"+shellPath)
+	if sessions != 0 || count != 0 {
+		t.Fatalf("expected timed-out shell to be dropped from the pool; sessions=%d count=%d", sessions, count)
+	}
+
+	pid2, stdout2, exit2, err := runPersistentShellCommandWithPID(context.Background(), t, r, root, shellPath, spec, []string{"/bin/sh", "-c", "printf replacement-ok"})
+	if err != nil {
+		t.Fatalf("replacement persistent-shell run: %v", err)
+	}
+	if exit2 != 0 || !strings.Contains(stdout2, "replacement-ok") {
+		t.Fatalf("unexpected replacement run stdout=%q exit=%d", stdout2, exit2)
+	}
+	if pid2 == 0 || pid2 == pid1 {
+		t.Fatalf("expected replacement shell pid distinct from timed-out shell, got pid1=%d pid2=%d", pid1, pid2)
+	}
+
+	sessions, count = shellPoolSnapshot(r, root+"\x00"+shellPath)
+	if sessions != 1 || count != 1 {
+		t.Fatalf("expected replacement shell to return to pool; sessions=%d count=%d", sessions, count)
+	}
+}
+
+func TestPersistentShellStaleSessionIsReplacedByFreshShell(t *testing.T) {
+	shellPath := requirePersistentShellTestShell(t)
+	root := t.TempDir()
+	r, spec := persistentShellCheckoutTestRunner(t, root, shellPath, 2)
+	defer r.ClosePersistentShells()
+
+	pid1, stdout1, exit1, err := runPersistentShellCommandWithPID(context.Background(), t, r, root, shellPath, spec, []string{"/bin/sh", "-c", "printf prime-ok"})
+	if err != nil {
+		t.Fatalf("prime persistent-shell run: %v", err)
+	}
+	if exit1 != 0 || !strings.Contains(stdout1, "prime-ok") {
+		t.Fatalf("unexpected prime run stdout=%q exit=%d", stdout1, exit1)
+	}
+
+	key := root + "\x00" + shellPath
+	r.shellMu.Lock()
+	pool := r.shellPools[key]
+	r.shellMu.Unlock()
+	if pool == nil {
+		t.Fatal("expected persistent shell pool after prime run")
+	}
+	pool.mu.Lock()
+	if len(pool.sessions) != 1 {
+		pool.mu.Unlock()
+		t.Fatalf("expected one ready session in pool, got %d", len(pool.sessions))
+	}
+	sess := pool.sessions[0]
+	pool.mu.Unlock()
+
+	if err := sess.pty.Close(); err != nil {
+		t.Fatalf("close stale PTY: %v", err)
+	}
+
+	pid2, stdout2, exit2, err := runPersistentShellCommandWithPID(context.Background(), t, r, root, shellPath, spec, []string{"/bin/sh", "-c", "printf retry-ok"})
+	if err != nil {
+		t.Fatalf("run after stale session: %v", err)
+	}
+	if exit2 != 0 || !strings.Contains(stdout2, "retry-ok") {
+		t.Fatalf("unexpected retry run stdout=%q exit=%d", stdout2, exit2)
+	}
+	if pid2 == 0 || pid1 == 0 || pid2 == pid1 {
+		t.Fatalf("expected stale session to be replaced, got pid1=%d pid2=%d", pid1, pid2)
+	}
+
+	sessions, count := shellPoolSnapshot(r, key)
+	if sessions != 1 || count != 1 {
+		t.Fatalf("expected one healthy replacement session in pool; sessions=%d count=%d", sessions, count)
+	}
+}
+
 func TestPersistentShellRunDoesNotWaitForLockedSessionEvenWithLongAcquireTimeout(t *testing.T) {
 	shellPath := requirePersistentShellTestShell(t)
 	root := t.TempDir()
@@ -169,14 +319,17 @@ func TestPersistentShellRunDoesNotWaitForLockedSessionEvenWithLongAcquireTimeout
 	defer r.ClosePersistentShells()
 	r.Cfg.CommandEnvironment.PersistentShellAcquireTimeoutSeconds = 30
 
-	sess, err := r.persistentSession(context.Background(), root, shellPath, root, spec)
-	if err != nil {
-		t.Fatalf("create persistent shell: %v", err)
-	}
-	if err := sess.lockRun(context.Background()); err != nil {
-		t.Fatalf("lock persistent shell: %v", err)
-	}
-	defer sess.unlockRun()
+	release := make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		_ = r.withPersistentShellSession(context.Background(), root, shellPath, root, spec, nil, func(_ *persistentShell) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer close(release)
 
 	started := time.Now()
 	out, err := r.runPersistentShell(context.Background(), spec, spec.Args, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
@@ -203,7 +356,7 @@ func TestStartNamedPersistentShellConfiguredJobStillUsesBackgroundExec(t *testin
 	cfg.Limits.MaxCommandOutputBytes = 10000
 	cfg.CommandEnvironment.AllowPersistentShell = true
 	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
-	cfg.Commands = []config.CommandSpec{{Name: "foreground-shell-job", Exec: "sh", Args: []string{"-c", "printf job-ok"}, Cwd: root, RunMode: "persistent_shell", Shell: shellPath}}
+	cfg.Commands = []config.CommandSpec{{Name: "foreground-shell-job", Exec: "sh", Args: []string{"-c", "printf job-ok"}, Cwd: root, RunMode: "persistent_shell", Shell: shellPath, StartupFiles: persistentShellTestStartupFiles(shellPath)}}
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 	defer r.ClosePersistentShells()
 
@@ -231,7 +384,7 @@ func TestStartNamedPersistentShellConfiguredJobStillUsesBackgroundExec(t *testin
 		t.Fatalf("expected job output, got %#v", result)
 	}
 
-	if sessions, starting := shellPoolSnapshot(r, root+"\x00"+shellPath); sessions != 0 || starting != 0 {
-		t.Fatalf("background job should not use foreground persistent shell pool; sessions=%d starting=%d", sessions, starting)
+	if sessions, count := shellPoolSnapshot(r, root+"\x00"+shellPath); sessions != 0 || count != 0 {
+		t.Fatalf("background job should not use foreground persistent shell pool; sessions=%d count=%d", sessions, count)
 	}
 }

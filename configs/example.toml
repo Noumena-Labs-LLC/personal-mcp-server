@@ -435,8 +435,10 @@ allowed_shells = ["/bin/zsh", "/bin/bash"]
 # A busy pool waits briefly for an idle session before returning a busy timeout.
 persistent_shell_pool_size = 2
 persistent_shell_acquire_timeout_seconds = 6
+# Require a full quiet window before sending the startup readiness marker.
+persistent_shell_quiet_period_ms = 1000
 # Login-shell startup can be slower on machines that load pyenv/nvm/direnv/completions.
-persistent_shell_startup_timeout_seconds = 15
+persistent_shell_startup_timeout_seconds = 30
 
 [[commands]]
 name = "git-status"
