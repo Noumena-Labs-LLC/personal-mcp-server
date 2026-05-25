@@ -306,6 +306,46 @@ func TestPersistentShellRunsInRequestedCwd(t *testing.T) {
 	}
 }
 
+func TestPersistentShellRunsWithZsh(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("persistent shell mode is Unix-only")
+	}
+	shellPath := "/bin/zsh"
+	if _, err := os.Stat(shellPath); err != nil {
+		t.Skip("/bin/zsh unavailable")
+	}
+	root := t.TempDir()
+	cfg := shellTestConfig(root)
+	cfg.Limits.CommandTimeoutSeconds = 5
+	cfg.Limits.MaxCommandOutputBytes = 20000
+	cfg.CommandEnvironment.AllowPersistentShell = true
+	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
+	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
+	defer r.ClosePersistentShells()
+	spec := config.CommandSpec{Name: "pwd", Exec: "pwd", RunMode: "persistent_shell", Shell: shellPath}
+	out, err := r.runPersistentShell(context.Background(), spec, nil, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
+	if err != nil {
+		t.Fatalf("run persistent shell zsh: %v", err)
+	}
+	result := shellResultMap(t, out)
+	if got, _ := result["duration_ms"].(int64); got == 0 {
+		t.Fatalf("expected duration metadata, got %#v", result)
+	} else if got > (persistentShellStartupTimeout + time.Second).Milliseconds() {
+		t.Fatalf("expected zsh startup result within startup timeout window, got %#v", result)
+	}
+	if failurePhase, _ := result["failure_phase"].(string); failurePhase != "" {
+		errText, _ := result["error"].(string)
+		if !strings.Contains(errText, "zsh compinit confirmation") && !strings.Contains(errText, "startup marker not observed") {
+			t.Fatalf("expected zsh startup failure to explain compinit prompt, got %#v", result)
+		}
+		return
+	}
+	stdout := shellResultStdout(t, result)
+	if !strings.Contains(stdout, root) {
+		t.Fatalf("expected stdout to contain cwd %q, got %q", root, stdout)
+	}
+}
+
 func TestPersistentShellCapturesPartialOutputWithoutNewlineOnTimeout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("persistent shell mode is Unix-only")

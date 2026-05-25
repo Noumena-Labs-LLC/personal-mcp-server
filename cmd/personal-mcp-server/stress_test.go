@@ -255,6 +255,46 @@ func TestStressPersistentShellPoolContention(t *testing.T) {
 	}
 }
 
+func TestStressPersistentShellInitFailureReturnsFast(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("stress tests are not portable to Windows in this repository")
+	}
+
+	port := freeLocalPort(t)
+	root := t.TempDir()
+	hangingShell := writeHangingShell(t, root)
+	configPath := writeStressConfigWithAllowedShells(t, root, port, []string{hangingShell})
+	writeStressProjectConfigWithShell(t, root, hangingShell)
+	cmd := startStressHelper(t, configPath)
+	defer stopProcess(t, cmd)
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitForHealthz(t, baseURL+"/healthz")
+
+	started := time.Now()
+	body, err := stressPostMCP(baseURL, port, `{"jsonrpc":"2.0","id":60,"method":"tools/call","params":{"name":"cmd_run_named","arguments":{"name":"pool-fast","cwd":"."}}}`)
+	if err != nil {
+		t.Fatalf("run named with hanging shell: %v", err)
+	}
+	elapsed := time.Since(started)
+	if elapsed > 6*time.Second {
+		t.Fatalf("persistent shell init failure should return quickly, took %s", elapsed)
+	}
+	payload, err := stressToolMap(body)
+	if err != nil {
+		t.Fatalf("parse tool result: %v", err)
+	}
+	if got, _ := payload["failure_phase"].(string); got != "persistent_shell_init" {
+		t.Fatalf("expected persistent_shell_init failure, got %#v", payload)
+	}
+	if ok, _ := payload["ok"].(bool); ok {
+		t.Fatalf("expected init failure result, got %#v", payload)
+	}
+	if retryable, _ := payload["retryable"].(bool); !retryable {
+		t.Fatalf("expected retryable init failure, got %#v", payload)
+	}
+}
+
 func startStressHelper(t *testing.T, configPath string) *exec.Cmd {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -269,9 +309,16 @@ func startStressHelper(t *testing.T, configPath string) *exec.Cmd {
 
 func writeStressConfig(t *testing.T, root string, port int) string {
 	t.Helper()
+	return writeStressConfigWithAllowedShells(t, root, port, nil)
+}
+
+func writeStressConfigWithAllowedShells(t *testing.T, root string, port int, extraAllowedShells []string) string {
+	t.Helper()
 	configPath := filepath.Join(t.TempDir(), "stress-config.toml")
 	auditPath := filepath.Join(t.TempDir(), "stress-audit.log")
 	trustStore := filepath.Join(t.TempDir(), "stress-trusted-projects.toml")
+	allowedShells := []string{"/bin/bash", "/bin/sh"}
+	allowedShells = append(allowedShells, extraAllowedShells...)
 	content := fmt.Sprintf(`config_version = 1
 roots = [%q]
 
@@ -357,7 +404,7 @@ default = "deny"
 
 [command_environment]
 allow_persistent_shell = true
-allowed_shells = ["/bin/bash", "/bin/sh"]
+allowed_shells = [%s]
 persistent_shell_pool_size = 2
 persistent_shell_acquire_timeout_seconds = 1
 
@@ -370,7 +417,7 @@ args = ["-c", "printf job-output"]
 name = "job-sleep"
 exec = "/bin/sh"
 args = ["-c", "sleep 1; printf late"]
-`, root, port, auditPath, trustStore, root)
+`, root, port, auditPath, trustStore, root, quoteStressList(allowedShells))
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write stress config: %v", err)
 	}
@@ -379,7 +426,12 @@ args = ["-c", "sleep 1; printf late"]
 
 func writeStressProjectConfig(t *testing.T, root string) {
 	t.Helper()
-	content := `config_kind = "project"
+	writeStressProjectConfigWithShell(t, root, "/bin/bash")
+}
+
+func writeStressProjectConfigWithShell(t *testing.T, root, shellPath string) {
+	t.Helper()
+	content := fmt.Sprintf(`config_kind = "project"
 config_version = 1
 
 [project]
@@ -387,7 +439,7 @@ name = "stress-project"
 
 [command_environment]
 run_mode = "persistent_shell"
-shell = "/bin/bash"
+shell = %q
 
 [[commands]]
 name = "pool-slow"
@@ -398,10 +450,28 @@ args = ["-c", "printf started > pool-started.txt; sleep 1; printf pool-slow"]
 name = "pool-fast"
 exec = "/bin/sh"
 args = ["-c", "printf pool-fast"]
-`
+`, shellPath)
 	if err := os.WriteFile(filepath.Join(root, ".personal-mcp-server.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write stress project config: %v", err)
 	}
+}
+
+func writeHangingShell(t *testing.T, root string) string {
+	t.Helper()
+	path := filepath.Join(root, "hanging-shell.sh")
+	body := "#!/bin/sh\nsleep 30\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatalf("write hanging shell: %v", err)
+	}
+	return path
+}
+
+func quoteStressList(items []string) string {
+	quoted := make([]string, 0, len(items))
+	for _, item := range items {
+		quoted = append(quoted, fmt.Sprintf("%q", item))
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func stressPostMCP(baseURL string, port int, body string) (string, error) {
