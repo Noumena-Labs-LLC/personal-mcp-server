@@ -382,6 +382,13 @@ func (r *Runner) persistentShellPoolSize() int {
 	return 2
 }
 
+func (r *Runner) persistentShellStartupTimeout() time.Duration {
+	if r.Cfg != nil && r.Cfg.CommandEnvironment.PersistentShellStartupTimeoutSeconds > 0 {
+		return time.Duration(r.Cfg.CommandEnvironment.PersistentShellStartupTimeoutSeconds) * time.Second
+	}
+	return 15 * time.Second
+}
+
 func (r *Runner) persistentSession(ctx context.Context, root, shellPath, cwd string, spec config.CommandSpec) (*persistentShell, error) {
 	sess, err := r.checkoutPersistentSession(ctx, root, shellPath, cwd, spec)
 	if err != nil {
@@ -423,7 +430,7 @@ func (r *Runner) checkoutPersistentSession(ctx context.Context, root, shellPath,
 	pool.starting++
 	pool.mu.Unlock()
 
-	sess, err := newPersistentShell(ctx, key, shellPath, cwd, spec)
+	sess, err := newPersistentShell(ctx, r.persistentShellStartupTimeout(), key, shellPath, cwd, spec)
 	if err == nil {
 		// Claim the newly-created shell before publishing it into the pool so no
 		// concurrent foreground command can steal the session from its creator.

@@ -307,6 +307,7 @@ allow_persistent_shell = false
 allowed_shells = ["/bin/zsh", "/bin/bash"]
 persistent_shell_pool_size = 2
 persistent_shell_acquire_timeout_seconds = 6
+persistent_shell_startup_timeout_seconds = 15
 
 [command_policy]
 default = "deny"

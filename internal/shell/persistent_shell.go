@@ -24,8 +24,6 @@ type persistentShell struct {
 	runLock chan struct{}
 }
 
-const persistentShellStartupTimeout = 4 * time.Second
-
 type persistentShellWriteError struct {
 	err error
 }
@@ -59,11 +57,6 @@ func persistentShellEnv(spec config.CommandSpec) []string {
 	env := os.Environ()
 	if runtime.GOOS == "darwin" {
 		env = removeEnv(env, "LC_ALL", "C.UTF-8")
-	}
-	if strings.Contains(filepathBase(spec.Shell), "zsh") {
-		env = upsertEnv(env, "ZSH_DISABLE_COMPFIX", "true")
-		env = upsertEnv(env, "DISABLE_AUTO_UPDATE", "true")
-		env = upsertEnv(env, "DISABLE_UPDATE_PROMPT", "true")
 	}
 	for k, v := range spec.Env {
 		env = upsertEnv(env, k, v)
@@ -99,20 +92,8 @@ func removeEnv(env []string, key, value string) []string {
 	return out
 }
 
-func filepathBase(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	lastSlash := strings.LastIndex(path, "/")
-	if lastSlash < 0 {
-		return path
-	}
-	return path[lastSlash+1:]
-}
-
-func newPersistentShell(ctx context.Context, key, shellPath, cwd string, spec config.CommandSpec) (*persistentShell, error) {
-	startupCtx, cancel := persistentShellStartupContext(ctx)
+func newPersistentShell(ctx context.Context, startupTimeout time.Duration, key, shellPath, cwd string, spec config.CommandSpec) (*persistentShell, error) {
+	startupCtx, cancel := persistentShellStartupContext(ctx, startupTimeout)
 	defer cancel()
 	master, slave, err := openPty()
 	if err != nil {
@@ -152,16 +133,19 @@ func newPersistentShell(ctx context.Context, key, shellPath, cwd string, spec co
 	return shell, nil
 }
 
-func persistentShellStartupContext(parent context.Context) (context.Context, context.CancelFunc) {
+func persistentShellStartupContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
 	if parent == nil {
-		return context.WithTimeout(context.Background(), persistentShellStartupTimeout)
+		return context.WithTimeout(context.Background(), timeout)
 	}
 	if deadline, ok := parent.Deadline(); ok {
-		if remaining := time.Until(deadline); remaining <= persistentShellStartupTimeout {
+		if remaining := time.Until(deadline); remaining <= timeout {
 			return context.WithCancel(parent)
 		}
 	}
-	return context.WithTimeout(parent, persistentShellStartupTimeout)
+	return context.WithTimeout(parent, timeout)
 }
 
 func (p *persistentShell) waitReady(ctx context.Context) error {

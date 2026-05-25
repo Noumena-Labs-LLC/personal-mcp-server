@@ -215,6 +215,37 @@ Values = ["--help"]
 	}
 }
 
+func TestCommandEnvironmentPersistentShellDefaults(t *testing.T) {
+	t.Setenv("PERSONAL_MCP_TOKEN", "token")
+	root := t.TempDir()
+	cfg, err := Load(writeConfig(t, root, minimalConfig(root)))
+	if err != nil {
+		t.Fatalf("expected config to load: %v", err)
+	}
+	if got := cfg.CommandEnvironment.PersistentShellPoolSize; got != 2 {
+		t.Fatalf("persistent shell pool size = %d, want 2", got)
+	}
+	if got := cfg.CommandEnvironment.PersistentShellAcquireTimeoutSeconds; got != 6 {
+		t.Fatalf("persistent shell acquire timeout = %d, want 6", got)
+	}
+	if got := cfg.CommandEnvironment.PersistentShellStartupTimeoutSeconds; got != 15 {
+		t.Fatalf("persistent shell startup timeout = %d, want 15", got)
+	}
+}
+
+func TestLoadRejectsNegativePersistentShellStartupTimeout(t *testing.T) {
+	t.Setenv("PERSONAL_MCP_TOKEN", "token")
+	root := t.TempDir()
+	cfg := minimalConfig(root) + `
+[command_environment]
+persistent_shell_startup_timeout_seconds = -1
+`
+	_, err := Load(writeConfig(t, root, cfg))
+	if err == nil || !strings.Contains(err.Error(), "persistent shell pool settings cannot be negative") {
+		t.Fatalf("expected persistent shell startup timeout error, got %v", err)
+	}
+}
+
 func TestSnakeCaseWinsOverCamelCaseAlias(t *testing.T) {
 	t.Setenv("PERSONAL_MCP_TOKEN", "token")
 	root := t.TempDir()

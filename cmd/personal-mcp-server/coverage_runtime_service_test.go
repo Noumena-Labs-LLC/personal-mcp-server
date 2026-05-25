@@ -226,3 +226,103 @@ echo "fake service binary"`)
 		t.Fatal(err)
 	}
 }
+
+func TestStartLaunchAgentUsesKickstartWhenAlreadyLoaded(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("service helper branch coverage targets macOS launchctl path")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	t.Setenv("PERSONAL_MCP_ROOT", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	for _, dir := range []string{filepath.Join(root, "bin"), filepath.Join(home, "Library", "LaunchAgents"), filepath.Join(home, ".config")} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marker := filepath.Join(root, "bootstrap-called")
+	writeExecutableScript(t, root, "launchctl", `case "${1:-}" in
+  print)
+    echo "pid = 123"
+    exit 0
+    ;;
+  bootstrap)
+    touch "`+marker+`"
+    echo "Bootstrap failed: 5: Input/output error" >&2
+    exit 5
+    ;;
+  kickstart)
+    exit 0
+    ;;
+esac
+echo "unexpected launchctl args: $*" >&2
+exit 2`)
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	plistPath, err := launchAgentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plistPath, []byte("<plist/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := startLaunchAgent(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap should not run for an already-loaded LaunchAgent, stat err = %v", err)
+	}
+}
+
+func TestServiceRestartIgnoresStoppedLaunchAgent(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("service helper branch coverage targets macOS launchctl path")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	t.Setenv("PERSONAL_MCP_ROOT", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	for _, dir := range []string{filepath.Join(root, "bin"), filepath.Join(home, "Library", "LaunchAgents"), filepath.Join(home, ".config")} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeExecutableScript(t, root, "launchctl", `case "${1:-}" in
+  bootout)
+    echo "Boot-out failed: 3: No such process" >&2
+    exit 3
+    ;;
+  print)
+    exit 1
+    ;;
+  bootstrap|kickstart)
+    exit 0
+    ;;
+esac
+echo "unexpected launchctl args: $*" >&2
+exit 2`)
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	plistPath, err := launchAgentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plistPath, []byte("<plist/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := captureStdStreams(t, func() {
+		if err := serviceRestart(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if stdout != "" {
+		t.Fatalf("serviceRestart stdout = %q, want empty", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("serviceRestart stderr = %q, want empty", stderr)
+	}
+}
