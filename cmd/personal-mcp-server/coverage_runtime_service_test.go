@@ -75,6 +75,19 @@ exit 2`
 	return writeExecutableScript(t, dir, "launchctl", script)
 }
 
+func assertLaunchAgentPathUnderHome(t *testing.T, home string) string {
+	t.Helper()
+	plistPath, err := launchAgentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := filepath.Clean(filepath.Join(home, "Library", "LaunchAgents")) + string(os.PathSeparator)
+	if !strings.HasPrefix(filepath.Clean(plistPath), wantPrefix) {
+		t.Fatalf("launchAgentPath escaped test home: got %q, want prefix %q", plistPath, wantPrefix)
+	}
+	return plistPath
+}
+
 func TestRuntimeLifecycleHelpersDirect(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -148,6 +161,9 @@ echo "fake service binary"`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := assertLaunchAgentPathUnderHome(t, home); got != spec.Platforms["darwin"].ManifestPath {
+		t.Fatalf("launchAgentPath = %q, want %q", got, spec.Platforms["darwin"].ManifestPath)
+	}
 	manifestPath := spec.Platforms["darwin"].ManifestPath
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o750); err != nil {
 		t.Fatal(err)
@@ -157,6 +173,7 @@ echo "fake service binary"`)
 	}
 
 	out, errOut := captureStdStreams(t, func() {
+		assertLaunchAgentPathUnderHome(t, home)
 		if err := serviceInstall(fakeBinary, configPath); err != nil {
 			t.Fatal(err)
 		}
@@ -166,6 +183,7 @@ echo "fake service binary"`)
 	}
 
 	out, errOut = captureStdStreams(t, func() {
+		assertLaunchAgentPathUnderHome(t, home)
 		if err := serviceStatus(fakeBinary, configPath); err != nil {
 			t.Fatal(err)
 		}
@@ -175,6 +193,7 @@ echo "fake service binary"`)
 	}
 
 	_, errOut = captureStdStreams(t, func() {
+		assertLaunchAgentPathUnderHome(t, home)
 		if err := serviceRestart(); err != nil {
 			t.Fatal(err)
 		}
@@ -196,6 +215,7 @@ echo "fake service binary"`)
 	}
 
 	out, errOut = captureStdStreams(t, func() {
+		assertLaunchAgentPathUnderHome(t, home)
 		if err := serviceUninstall(); err != nil {
 			t.Fatal(err)
 		}

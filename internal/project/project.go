@@ -58,8 +58,9 @@ type GeneratedFiles struct {
 }
 
 type CommandEnvironment struct {
-	RunMode string `toml:"run_mode" json:"run_mode,omitempty"`
-	Shell   string `toml:"shell" json:"shell,omitempty"`
+	RunMode      string   `toml:"run_mode" json:"run_mode,omitempty"`
+	Shell        string   `toml:"shell" json:"shell,omitempty"`
+	StartupFiles []string `toml:"startup_files" json:"startup_files,omitempty"`
 }
 
 type Config struct {
@@ -490,11 +491,17 @@ func (c *Config) Validate() error {
 	seen := map[string]bool{}
 	defaultRunMode := strings.TrimSpace(c.CommandEnv.RunMode)
 	defaultShell := strings.TrimSpace(c.CommandEnv.Shell)
+	defaultStartupFiles := append([]string(nil), c.CommandEnv.StartupFiles...)
 	if defaultRunMode != "" && defaultRunMode != "argv" && defaultRunMode != "persistent_shell" {
 		return fmt.Errorf("command_environment has invalid run_mode %q", defaultRunMode)
 	}
 	if defaultRunMode == "persistent_shell" && defaultShell == "" {
 		return errors.New("command_environment run_mode persistent_shell requires shell")
+	}
+	for _, file := range defaultStartupFiles {
+		if strings.TrimSpace(file) == "" {
+			return errors.New("command_environment startup_files cannot contain empty paths")
+		}
 	}
 	for _, pattern := range append(append([]string{}, c.ProtectedFiles.DenyEdit...), c.ProtectedFiles.PromptEdit...) {
 		if strings.TrimSpace(pattern) == "" {
@@ -546,11 +553,26 @@ func (c *Config) Validate() error {
 		if shell == "" {
 			shell = defaultShell
 		}
+		startupFiles := append([]string(nil), cmd.StartupFiles...)
+		if len(startupFiles) == 0 {
+			startupFiles = append(startupFiles, defaultStartupFiles...)
+		}
 		if runMode != "" && runMode != "argv" && runMode != "persistent_shell" {
 			return fmt.Errorf("project command %q has invalid run_mode %q", cmd.Name, runMode)
 		}
 		if runMode == "persistent_shell" && shell == "" {
 			return fmt.Errorf("project command %q run_mode persistent_shell requires shell", cmd.Name)
+		}
+		for _, file := range startupFiles {
+			if strings.TrimSpace(file) == "" {
+				return fmt.Errorf("project command %q startup_files cannot contain empty paths", cmd.Name)
+			}
+		}
+		if runMode == "persistent_shell" {
+			shellBase := path.Base(shell)
+			if (shellBase == "bash" || shellBase == "zsh") && len(startupFiles) == 0 {
+				return fmt.Errorf("project command %q run_mode persistent_shell with %s requires startup_files", cmd.Name, shellBase)
+			}
 		}
 		if strings.Contains(cmd.Cwd, "\x00") {
 			return fmt.Errorf("project command %q cwd contains NUL", cmd.Name)

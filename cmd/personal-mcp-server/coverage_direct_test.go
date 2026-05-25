@@ -113,6 +113,9 @@ func TestInitAndVersionHelpersDirect(t *testing.T) {
 	if info["name"] != "personal-mcp-server" || info["transport"] != "streamable_http" {
 		t.Fatalf("unexpected serverInfo: %#v", info)
 	}
+	if digest, ok := info["binary_sha256"].(string); !ok || len(digest) != 64 {
+		t.Fatalf("unexpected binary_sha256 in serverInfo: %#v", info["binary_sha256"])
+	}
 
 	out, _ := captureOutput(t, printVersion)
 	for _, want := range []string{"personal-mcp-server ", "go: ", "mcp-go-sdk:"} {
@@ -589,6 +592,11 @@ exit 0`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "darwin" {
+		if got := assertLaunchAgentPathUnderHome(t, home); got != spec.Platforms["darwin"].ManifestPath {
+			t.Fatalf("launchAgentPath = %q, want %q", got, spec.Platforms["darwin"].ManifestPath)
+		}
+	}
 	switch runtime.GOOS {
 	case "linux":
 		if err := os.MkdirAll(filepath.Dir(spec.Platforms["linux"].ManifestPath), 0o750); err != nil {
@@ -651,17 +659,32 @@ exit 0`)
 		t.Fatalf("service logs output:\n%s", out)
 	}
 
+	if runtime.GOOS == "darwin" {
+		assertLaunchAgentPathUnderHome(t, home)
+	}
 	if err := serviceStatus(fakeBinary, configPath); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "darwin" {
+		assertLaunchAgentPathUnderHome(t, home)
 	}
 	if err := serviceDoctor(fakeBinary, configPath); err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "darwin" {
+		assertLaunchAgentPathUnderHome(t, home)
+	}
 	if err := serviceStart(); err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "darwin" {
+		assertLaunchAgentPathUnderHome(t, home)
+	}
 	if err := serviceStop(); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "darwin" {
+		assertLaunchAgentPathUnderHome(t, home)
 	}
 	if err := serviceRestart(); err != nil {
 		t.Fatal(err)
@@ -704,8 +727,14 @@ exit 0`)
 	if got := systemdManifestQuote(`a b`); got != `"a b"` {
 		t.Fatalf("systemdManifestQuote = %q", got)
 	}
+	if runtime.GOOS == "darwin" {
+		assertLaunchAgentPathUnderHome(t, home)
+	}
 	if err := serviceInstall(fakeBinary, configPath); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "darwin" {
+		assertLaunchAgentPathUnderHome(t, home)
 	}
 	if err := serviceUninstall(); err != nil {
 		t.Fatal(err)

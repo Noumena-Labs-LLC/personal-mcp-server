@@ -228,21 +228,31 @@ func TestCommandEnvironmentPersistentShellDefaults(t *testing.T) {
 	if got := cfg.CommandEnvironment.PersistentShellAcquireTimeoutSeconds; got != 6 {
 		t.Fatalf("persistent shell acquire timeout = %d, want 6", got)
 	}
-	if got := cfg.CommandEnvironment.PersistentShellStartupTimeoutSeconds; got != 15 {
-		t.Fatalf("persistent shell startup timeout = %d, want 15", got)
+	if got := cfg.CommandEnvironment.PersistentShellStartupTimeoutSeconds; got != 30 {
+		t.Fatalf("persistent shell startup timeout = %d, want 30", got)
+	}
+	if got := cfg.CommandEnvironment.PersistentShellQuietPeriodMs; got != 1000 {
+		t.Fatalf("persistent shell quiet period = %d, want 1000", got)
 	}
 }
 
-func TestLoadRejectsNegativePersistentShellStartupTimeout(t *testing.T) {
+func TestLoadRejectsNegativePersistentShellStartupSettings(t *testing.T) {
 	t.Setenv("PERSONAL_MCP_TOKEN", "token")
-	root := t.TempDir()
-	cfg := minimalConfig(root) + `
-[command_environment]
-persistent_shell_startup_timeout_seconds = -1
-`
-	_, err := Load(writeConfig(t, root, cfg))
-	if err == nil || !strings.Contains(err.Error(), "persistent shell pool settings cannot be negative") {
-		t.Fatalf("expected persistent shell startup timeout error, got %v", err)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "startup_timeout", body: "persistent_shell_startup_timeout_seconds = -1"},
+		{name: "quiet_period", body: "persistent_shell_quiet_period_ms = -1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfg := minimalConfig(root) + "\n[command_environment]\n" + tc.body + "\n"
+			_, err := Load(writeConfig(t, root, cfg))
+			if err == nil || !strings.Contains(err.Error(), "persistent shell pool settings cannot be negative") {
+				t.Fatalf("expected persistent shell settings error, got %v", err)
+			}
+		})
 	}
 }
 
@@ -260,5 +270,39 @@ AllowEverything = true
 	}
 	if cfg.Defaults.AllowEverything {
 		t.Fatal("expected canonical snake_case value to win over CamelCase alias")
+	}
+}
+
+func TestLoadRejectsPersistentShellBashWithoutStartupFiles(t *testing.T) {
+	t.Setenv("PERSONAL_MCP_TOKEN", "token")
+	root := t.TempDir()
+	cfgBody := minimalConfig(root) + `
+[[commands]]
+name = "pytest"
+exec = "python3"
+args = ["-m", "pytest"]
+run_mode = "persistent_shell"
+shell = "/bin/bash"
+`
+	_, err := Load(writeConfig(t, root, cfgBody))
+	if err == nil || !strings.Contains(err.Error(), `run_mode persistent_shell with bash requires startup_files`) {
+		t.Fatalf("expected bash startup_files validation error, got %v", err)
+	}
+}
+
+func TestLoadRejectsPersistentShellZshWithoutStartupFiles(t *testing.T) {
+	t.Setenv("PERSONAL_MCP_TOKEN", "token")
+	root := t.TempDir()
+	cfgBody := minimalConfig(root) + `
+[[commands]]
+name = "pytest"
+exec = "python3"
+args = ["-m", "pytest"]
+run_mode = "persistent_shell"
+shell = "/bin/zsh"
+`
+	_, err := Load(writeConfig(t, root, cfgBody))
+	if err == nil || !strings.Contains(err.Error(), `run_mode persistent_shell with zsh requires startup_files`) {
+		t.Fatalf("expected zsh startup_files validation error, got %v", err)
 	}
 }
