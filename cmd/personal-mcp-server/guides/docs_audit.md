@@ -14,7 +14,7 @@ The CI gate includes formatting, vet, Staticcheck, golangci-lint, race-enabled t
 
 ## Security posture
 
-The server remains localhost-only, bearer-token protected, Host/Origin validated, sandboxed to configured roots, and argv-only for command execution. Project trust is stored outside repositories and refreshed by project-aware MCP operations.
+The server remains localhost-only, bearer-token protected, Host/Origin validated, sandboxed to configured roots, and argv-only for command execution. Project trust is stored outside repositories, loaded at server startup, and mutated through server-owned trust operations while running.
 
 ## Documentation posture
 

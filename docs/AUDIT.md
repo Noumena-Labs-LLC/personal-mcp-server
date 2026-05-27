@@ -64,7 +64,7 @@ Core security posture:
 - File mutation tools intentionally avoid hash, expected-size, dry-run, and plan-hash gates for a low-friction single-user local model while keeping roots, policy, secret deny rules, directory refusal, and overwrite protection.
 - Dynamic command execution is argv-based, policy-checked, timeout-bounded, and output-capped.
 - Raw shell execution is not exposed by default.
-- Project trust is stored outside the repository and refreshed by project-aware MCP operations.
+- Project trust is stored outside the repository, loaded at server startup, and mutated through server-owned trust operations while running.
 - Config, token, project config, service file, and trust-store writes use atomic replacement.
 
 Current follow-ups to watch:

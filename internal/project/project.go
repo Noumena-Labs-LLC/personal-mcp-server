@@ -99,19 +99,26 @@ type State struct {
 	Error   string  `json:"error,omitempty"`
 }
 
-const trustStoreRefreshTTL = 2 * time.Second
-
 type Manager struct {
-	mu               sync.RWMutex
-	Global           *config.Config
-	Sandbox          *fsx.Sandbox
-	Filename         string
-	TrustPath        string
-	AutoLoad         bool
-	Trusted          map[string]TrustedProject
-	lastTrustRefresh time.Time
-	lastTrustModTime time.Time
-	lastTrustSize    int64
+	mu        sync.RWMutex
+	Global    *config.Config
+	Sandbox   *fsx.Sandbox
+	Filename  string
+	TrustPath string
+	AutoLoad  bool
+	Trusted   map[string]TrustedProject
+}
+
+func withTrustedRead[T any](m *Manager, fn func(map[string]TrustedProject) T) T {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return fn(m.Trusted)
+}
+
+func withTrustedWrite[T any](m *Manager, fn func(map[string]TrustedProject) (T, error)) (T, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return fn(m.Trusted)
 }
 
 func NewManager(global *config.Config, sandbox *fsx.Sandbox) (*Manager, error) {
@@ -128,7 +135,9 @@ func NewManager(global *config.Config, sandbox *fsx.Sandbox) (*Manager, error) {
 		return nil, err
 	}
 	m := &Manager{Global: global, Sandbox: sandbox, Filename: filename, TrustPath: trustPath, AutoLoad: global.ProjectConfigs.AutoLoad, Trusted: map[string]TrustedProject{}}
-	_ = m.refreshTrustStore(true)
+	if err := m.loadTrustStore(); err != nil {
+		return nil, err
+	}
 	return m, nil
 }
 
@@ -139,9 +148,6 @@ func Enabled(global *config.Config) bool {
 func (m *Manager) Discover(cwd string) State {
 	if m == nil || !Enabled(m.Global) {
 		return State{Found: false}
-	}
-	if err := m.RefreshTrustStore(); err != nil {
-		return State{Found: false, Error: err.Error()}
 	}
 	base, err := m.Sandbox.ResolveWithCwd(".", cwd)
 	if err != nil {
@@ -184,10 +190,10 @@ func (m *Manager) IsTrusted(root string) bool {
 	if m.AutoLoad {
 		return true
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	entry, ok := m.Trusted[canonical(root)]
-	return ok && entry.Trusted
+	return withTrustedRead(m, func(trusted map[string]TrustedProject) bool {
+		entry, ok := trusted[canonical(root)]
+		return ok && entry.Trusted
+	})
 }
 
 func (m *Manager) Trust(cwd string) (TrustedProject, error) {
@@ -199,14 +205,14 @@ func (m *Manager) Trust(cwd string) (TrustedProject, error) {
 		return TrustedProject{}, fmt.Errorf("project config invalid: %s", state.Error)
 	}
 	entry := TrustedProject{Root: canonical(state.Root), Config: state.Path, Trusted: true, TrustedAt: time.Now().UTC().Format(time.RFC3339)}
-	m.mu.Lock()
-	m.Trusted[entry.Root] = entry
-	m.mu.Unlock()
-	if err := m.saveTrustStore(); err != nil {
-		return TrustedProject{}, err
-	}
-	m.markTrustStoreFresh()
-	return entry, nil
+	return withTrustedWrite(m, func(trusted map[string]TrustedProject) (TrustedProject, error) {
+		trusted[entry.Root] = entry
+		if err := m.saveTrustStoreLocked(); err != nil {
+			delete(trusted, entry.Root)
+			return TrustedProject{}, err
+		}
+		return entry, nil
+	})
 }
 
 func (m *Manager) Untrust(cwd string) error {
@@ -214,20 +220,25 @@ func (m *Manager) Untrust(cwd string) error {
 	if !state.Found {
 		return errors.New("no project config found")
 	}
-	m.mu.Lock()
-	delete(m.Trusted, canonical(state.Root))
-	m.mu.Unlock()
-	if err := m.saveTrustStore(); err != nil {
-		return err
-	}
-	m.markTrustStoreFresh()
-	return nil
+	root := canonical(state.Root)
+	_, err := withTrustedWrite(m, func(trusted map[string]TrustedProject) (struct{}, error) {
+		entry, ok := trusted[root]
+		delete(trusted, root)
+		if err := m.saveTrustStoreLocked(); err != nil {
+			if ok {
+				trusted[root] = entry
+			}
+			return struct{}{}, err
+		}
+		return struct{}{}, nil
+	})
+	return err
 }
 
 func (m *Manager) ListTrusted() []TrustedProject {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.listTrustedLocked()
+	return withTrustedRead(m, func(map[string]TrustedProject) []TrustedProject {
+		return m.listTrustedLocked()
+	})
 }
 
 func (m *Manager) listTrustedLocked() []TrustedProject {
@@ -334,16 +345,21 @@ func (m *Manager) DecideProjectFile(operation, requestedPath, resolvedPath strin
 }
 
 func (m *Manager) trustedProjectForResolved(resolvedPath string) (TrustedProject, bool) {
-	if err := m.RefreshTrustStore(); err != nil {
-		return TrustedProject{}, false
-	}
 	root, ok := m.projectRootForResolved(resolvedPath)
 	if !ok || !m.IsTrusted(root) {
 		return TrustedProject{}, false
 	}
-	m.mu.RLock()
-	entry, ok := m.Trusted[canonical(root)]
-	m.mu.RUnlock()
+	result := withTrustedRead(m, func(trusted map[string]TrustedProject) struct {
+		entry TrustedProject
+		ok    bool
+	} {
+		entry, ok := trusted[canonical(root)]
+		return struct {
+			entry TrustedProject
+			ok    bool
+		}{entry: entry, ok: ok}
+	})
+	entry, ok := result.entry, result.ok
 	if !ok || !entry.Trusted {
 		return TrustedProject{}, false
 	}
@@ -375,13 +391,15 @@ func (m *Manager) projectRootForResolved(resolvedPath string) (string, bool) {
 	}
 	best := ""
 	clean := canonical(resolvedPath)
-	m.mu.RLock()
-	for root := range m.Trusted {
-		if pathInside(root, clean) && len(root) > len(best) {
-			best = root
+	best = withTrustedRead(m, func(trusted map[string]TrustedProject) string {
+		best := ""
+		for root := range trusted {
+			if pathInside(root, clean) && len(root) > len(best) {
+				best = root
+			}
 		}
-	}
-	m.mu.RUnlock()
+		return best
+	})
 	if best != "" {
 		return best, true
 	}
@@ -718,36 +736,10 @@ func resolveExistingProjectParent(p string) (string, error) {
 	}
 }
 
-func (m *Manager) RefreshTrustStore() error {
-	return m.refreshTrustStore(false)
-}
-
-func (m *Manager) refreshTrustStore(force bool) error {
-	if !force {
-		m.mu.RLock()
-		recent := !m.lastTrustRefresh.IsZero() && time.Since(m.lastTrustRefresh) < trustStoreRefreshTTL
-		lastMod := m.lastTrustModTime
-		lastSize := m.lastTrustSize
-		m.mu.RUnlock()
-		if recent {
-			modTime, size, statErr := m.trustStoreSignature()
-			if statErr != nil {
-				if errors.Is(statErr, os.ErrNotExist) && lastMod.IsZero() && lastSize == 0 {
-					return nil
-				}
-			} else if modTime.Equal(lastMod) && size == lastSize {
-				return nil
-			}
-		}
-	}
+func (m *Manager) loadTrustStore() error {
 	trusted, err := m.loadTrustStoreSnapshot()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
-	}
-	modTime, size, statErr := m.trustStoreSignature()
-	if statErr != nil {
-		modTime = time.Time{}
-		size = 0
 	}
 	for _, root := range m.Global.ProjectConfigs.TrustedProjects {
 		abs, expandErr := expandAbs(root)
@@ -756,13 +748,14 @@ func (m *Manager) refreshTrustStore(force bool) error {
 			trusted[canon] = TrustedProject{Root: canon, Config: filepath.Join(canon, m.Filename), Trusted: true, TrustedAt: "config"}
 		}
 	}
-	m.mu.Lock()
-	m.Trusted = trusted
-	m.lastTrustRefresh = time.Now()
-	m.lastTrustModTime = modTime
-	m.lastTrustSize = size
-	m.mu.Unlock()
-	return nil
+	_, err = withTrustedWrite(m, func(current map[string]TrustedProject) (struct{}, error) {
+		clear(current)
+		for root, entry := range trusted {
+			current[root] = entry
+		}
+		return struct{}{}, nil
+	})
+	return err
 }
 
 func (m *Manager) loadTrustStoreSnapshot() (map[string]TrustedProject, error) {
@@ -787,31 +780,8 @@ func (m *Manager) loadTrustStoreSnapshot() (map[string]TrustedProject, error) {
 	return trusted, nil
 }
 
-func (m *Manager) markTrustStoreFresh() {
-	modTime, size, err := m.trustStoreSignature()
-	if err != nil {
-		modTime = time.Time{}
-		size = 0
-	}
-	m.mu.Lock()
-	m.lastTrustRefresh = time.Now()
-	m.lastTrustModTime = modTime
-	m.lastTrustSize = size
-	m.mu.Unlock()
-}
-
-func (m *Manager) trustStoreSignature() (modTime time.Time, size int64, err error) {
-	info, err := os.Stat(m.TrustPath)
-	if err != nil {
-		return time.Time{}, 0, err
-	}
-	return info.ModTime(), info.Size(), nil
-}
-
-func (m *Manager) saveTrustStore() error {
-	m.mu.RLock()
+func (m *Manager) saveTrustStoreLocked() error {
 	store := TrustStore{Projects: m.listTrustedLocked()}
-	m.mu.RUnlock()
 	b, err := toml.Marshal(store)
 	if err != nil {
 		return err

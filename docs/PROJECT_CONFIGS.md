@@ -24,6 +24,10 @@ Trust is stored outside the repo, so a cloned repository cannot approve itself:
 personal-mcp-server project trust --cwd ~/RnD/my-project
 ```
 
+The running server owns trust mutations and loads the trust store at startup.
+If the trust-store file is edited externally, restart the server before
+expecting those edits to take effect.
+
 Useful commands:
 
 ```bash

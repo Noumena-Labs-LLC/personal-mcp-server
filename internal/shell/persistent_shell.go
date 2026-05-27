@@ -527,6 +527,10 @@ func (p *persistentShell) setState(state persistentShellState) {
 	p.state.Store(int32(state))
 }
 
+func (p *persistentShell) transitionState(from, to persistentShellState) bool {
+	return p.state.CompareAndSwap(int32(from), int32(to))
+}
+
 func (p *persistentShell) currentState() persistentShellState {
 	return persistentShellState(p.state.Load())
 }

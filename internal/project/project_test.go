@@ -120,7 +120,7 @@ pattern = "^docs/.*\\.md$"
 	}
 }
 
-func TestDiscoverRefreshesTrustStoreChanges(t *testing.T) {
+func TestDiscoverDoesNotReloadExternalTrustStoreChanges(t *testing.T) {
 	root := t.TempDir()
 	m := testManager(t, root, `config_kind = "project"
 config_version = 1
@@ -150,8 +150,17 @@ trusted_at = "test"
 		t.Fatalf("write trust store: %v", err)
 	}
 	state = m.Discover(root)
+	if state.Trusted {
+		t.Fatalf("expected running manager to ignore external trust-store edits, got %#v", state)
+	}
+
+	reloaded, err := NewManager(m.Global, m.Sandbox)
+	if err != nil {
+		t.Fatalf("reload manager: %v", err)
+	}
+	state = reloaded.Discover(root)
 	if !state.Trusted {
-		t.Fatalf("expected trust-store change to be visible without new manager, got %#v", state)
+		t.Fatalf("expected trust-store change to be visible after reload, got %#v", state)
 	}
 }
 
