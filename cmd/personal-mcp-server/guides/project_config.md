@@ -139,7 +139,7 @@ When helping a user configure a project:
 
 ## Trust refresh
 
-Project trust is stored outside the repository in the configured trust store. Project-aware MCP tools refresh trust state when they inspect a project, so trusting or untrusting a project should become visible without restarting the server.
+Project trust is stored outside the repository in the configured trust store. The running server owns trust mutations and loads the trust store at startup; if the file is edited externally, restart the server before expecting those changes to take effect.
 
 ## Command run modes
 

@@ -22,7 +22,7 @@ For bug reports, include version, OS, config summary with secrets redacted, the 
 
 ## Project commands still missing after trust
 
-Call `project_info` with the same `cwd` you plan to use for `cmd_list_named` or `cmd_run_named`. The server refreshes project trust state for project-aware tools, so a restart should not normally be required. Verify that `[project_configs]` is enabled, the trust store path is correct, and the trusted root matches the project path under the configured root.
+Call `project_info` with the same `cwd` you plan to use for `cmd_list_named` or `cmd_run_named`. The server loads project trust state at startup and owns trust mutations while running, so restart the server after any external trust-store edits. Verify that `[project_configs]` is enabled, the trust store path is correct, and the trusted root matches the project path under the configured root.
 
 ## Command works in my terminal but fails through MCP
 

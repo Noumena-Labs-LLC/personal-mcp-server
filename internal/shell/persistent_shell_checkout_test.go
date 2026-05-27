@@ -183,6 +183,39 @@ func TestPersistentShellInitFailureCleansReservedSlot(t *testing.T) {
 	}
 }
 
+func TestPersistentShellCheckoutDropsDeadPooledSession(t *testing.T) {
+	shellPath := requirePersistentShellTestShell(t)
+	root := t.TempDir()
+	r, _ := persistentShellCheckoutTestRunner(t, root, shellPath, 1)
+	defer r.ClosePersistentShells()
+
+	key := root + "\x00" + shellPath
+	pool := r.ensurePersistentPool(key)
+	dead := newUninitializedPersistentShell(key)
+	dead.setState(persistentShellStateDead)
+
+	pool.mu.Lock()
+	pool.sessions = append(pool.sessions, dead)
+	pool.count = 1
+	pool.mu.Unlock()
+
+	sess, err := r.checkoutPersistentSession(key)
+	if err != nil {
+		t.Fatalf("checkout after dead pooled session: %v", err)
+	}
+	if sess == nil {
+		t.Fatal("expected replacement session after dropping dead pooled session")
+	}
+	if state := sess.currentState(); state != persistentShellStateNew {
+		t.Fatalf("expected replacement session to start new, got %v", state)
+	}
+
+	sessions, count := shellPoolSnapshot(r, key)
+	if sessions != 0 || count != 1 {
+		t.Fatalf("expected dead pooled session to be dropped and slot replaced; sessions=%d count=%d", sessions, count)
+	}
+}
+
 func TestPersistentShellReusesReadySessionForSequentialRuns(t *testing.T) {
 	shellPath := requirePersistentShellTestShell(t)
 	root := t.TempDir()
@@ -215,6 +248,29 @@ func TestPersistentShellReusesReadySessionForSequentialRuns(t *testing.T) {
 	sessions, count := shellPoolSnapshot(r, root+"\x00"+shellPath)
 	if sessions != 1 || count != 1 {
 		t.Fatalf("expected one ready shell reused in pool; sessions=%d count=%d", sessions, count)
+	}
+}
+
+func TestReturnPersistentSessionDoesNotRequeueDeadSession(t *testing.T) {
+	shellPath := requirePersistentShellTestShell(t)
+	root := t.TempDir()
+	r, _ := persistentShellCheckoutTestRunner(t, root, shellPath, 1)
+	defer r.ClosePersistentShells()
+
+	key := root + "\x00" + shellPath
+	pool := r.ensurePersistentPool(key)
+	sess := newUninitializedPersistentShell(key)
+	sess.setState(persistentShellStateDead)
+
+	pool.mu.Lock()
+	pool.count = 1
+	pool.mu.Unlock()
+
+	r.returnPersistentSession(sess)
+
+	sessions, count := shellPoolSnapshot(r, key)
+	if sessions != 0 || count != 0 {
+		t.Fatalf("expected dead session return to release pool slot; sessions=%d count=%d", sessions, count)
 	}
 }
 

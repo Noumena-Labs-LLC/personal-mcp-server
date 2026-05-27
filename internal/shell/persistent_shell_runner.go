@@ -200,15 +200,14 @@ func (r *Runner) ensurePersistentPool(key string) *persistentShellPool {
 	return pool
 }
 
-func (r *Runner) checkoutPersistentSession(key string) (*persistentShell, error) {
+func (r *Runner) checkoutPersistentSessionCore(key string) (sess *persistentShell, discarded []*persistentShell, err error) {
 	pool := r.ensurePersistentPool(key)
 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-
 	// invariant: every session in the pool is in the persistentShellStateReady state.
-	if len(pool.sessions) > 0 {
-		sess := pool.sessions[0]
+	for len(pool.sessions) > 0 {
+		sess = pool.sessions[0]
 		pool.sessions = pool.sessions[1:]
 		if state := sess.currentState(); state != persistentShellStateReady {
 			slog.Warn("persistent shell checkout observed non-ready pooled session",
@@ -217,14 +216,23 @@ func (r *Runner) checkoutPersistentSession(key string) (*persistentShell, error)
 				"remaining_ready_sessions", len(pool.sessions),
 				"pool_count", pool.count,
 			)
+			discarded = append(discarded, sess)
+			releasePersistentShellPoolSlotLocked(pool)
+			continue
 		}
-		return sess, nil
+		return sess, discarded, nil
 	}
 	if pool.count >= r.persistentShellPoolSize() {
-		return nil, persistentShellBusyError{err: errPersistentShellBusy}
+		return nil, discarded, persistentShellBusyError{err: errPersistentShellBusy}
 	}
 	pool.count++
-	return newUninitializedPersistentShell(key), nil
+	return newUninitializedPersistentShell(key), discarded, nil
+}
+
+func (r *Runner) checkoutPersistentSession(key string) (*persistentShell, error) {
+	sess, discarded, err := r.checkoutPersistentSessionCore(key)
+	killPersistentShells(discarded)
+	return sess, err
 }
 
 func (r *Runner) returnPersistentSession(sess *persistentShell) {
@@ -245,20 +253,42 @@ func (r *Runner) returnPersistentSession(sess *persistentShell) {
 	switch sess.currentState() {
 	case persistentShellStateDead:
 		slog.Warn("persistent shell session returned dead; releasing pool slot", "shell_session", sess.key, "count_before", pool.count)
-		if pool.count > 0 {
-			pool.count--
-		}
+		releasePersistentShellPoolSlotLocked(pool)
 	case persistentShellStateNew:
 		slog.Warn("persistent shell session returned uninitialized; releasing pool slot", "shell_session", sess.key, "count_before", pool.count)
-		if pool.count > 0 {
-			pool.count--
-		}
+		releasePersistentShellPoolSlotLocked(pool)
 	// invariant: every session in the pool is in the persistentShellStateReady state.
-	case persistentShellStateReady, persistentShellStateInUse:
-		sess.setState(persistentShellStateReady)
+	case persistentShellStateReady:
+		pool.sessions = append(pool.sessions, sess)
+	case persistentShellStateInUse:
+		if !sess.transitionState(persistentShellStateInUse, persistentShellStateReady) {
+			state := sess.currentState()
+			if state == persistentShellStateDead {
+				slog.Warn("persistent shell died before pool return completed; releasing pool slot", "shell_session", sess.key, "count_before", pool.count)
+			} else {
+				slog.Error("failed to transition persistent shell to ready during pool return", "shell_session", sess.key, "state", state, "count_before", pool.count)
+			}
+			releasePersistentShellPoolSlotLocked(pool)
+			return
+		}
 		pool.sessions = append(pool.sessions, sess)
 	default:
 		slog.Error("failed to return persistent shell session to pool", "shell_session", sess.key, "reason", "unexpected_state", "state", sess.currentState())
+		releasePersistentShellPoolSlotLocked(pool)
+	}
+}
+
+func releasePersistentShellPoolSlotLocked(pool *persistentShellPool) {
+	if pool != nil && pool.count > 0 {
+		pool.count--
+	}
+}
+
+func killPersistentShells(sessions []*persistentShell) {
+	for _, sess := range sessions {
+		if sess != nil {
+			sess.kill()
+		}
 	}
 }
 

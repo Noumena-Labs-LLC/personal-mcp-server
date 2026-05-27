@@ -97,7 +97,7 @@ See [`docs/TOOLS.md`](docs/TOOLS.md) for detailed tool guidance.
 
 ## Project configs
 
-Repositories can check in `.personal-mcp-server.toml` manifests with project-specific commands, workflow aliases, search defaults, protected/generated file rules, and guidance. Project configs are discovered automatically but are not trusted by default; trust is stored outside the repository.
+Repositories can check in `.personal-mcp-server.toml` manifests with project-specific commands, workflow aliases, search defaults, protected/generated file rules, and guidance. Project configs are discovered automatically but are not trusted by default; trust is stored outside the repository, loaded at server startup, and mutated by the server while it runs.
 
 See [`docs/PROJECT_CONFIGS.md`](docs/PROJECT_CONFIGS.md).
 
