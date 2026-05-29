@@ -25,8 +25,9 @@ type Runner struct {
 	shellMu    sync.Mutex
 	shellPools map[string]*persistentShellPool
 
-	jobMu sync.Mutex
-	jobs  map[string]*commandJob
+	jobMu      sync.Mutex
+	jobs       map[string]*commandJob
+	activeJobs int
 }
 
 func NewRunner(c *config.Config, s *fsx.Sandbox, approver *approval.Manager, projects *project.Manager) *Runner {
