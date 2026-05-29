@@ -144,6 +144,7 @@ func (r *Runner) runCommandJob(parentCtx context.Context, job *commandJob, spec 
 	cmd.Stdout = jobOutputWriter{stream: job.Stdout}
 	cmd.Stderr = jobOutputWriter{stream: job.Stderr}
 	setProcessGroup(cmd)
+	configureManagedCommand(cmd)
 
 	started := time.Now()
 	startErr := cmd.Start()

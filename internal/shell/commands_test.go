@@ -443,6 +443,49 @@ func TestPersistentShellCapturesPartialOutputWithoutNewlineOnTimeout(t *testing.
 	}
 }
 
+func TestPersistentShellHandlesUnsafeArgumentBytes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("persistent shell mode is Unix-only")
+	}
+	shellPath := "/bin/bash"
+	if _, err := os.Stat(shellPath); err != nil {
+		if _, shErr := os.Stat("/bin/sh"); shErr != nil {
+			t.Skip("no supported test shell available")
+		}
+		shellPath = "/bin/sh"
+	}
+	root := t.TempDir()
+	cfg := shellTestConfig(root)
+	cfg.Limits.CommandTimeoutSeconds = 3
+	cfg.Limits.MaxCommandOutputBytes = 10000
+	cfg.CommandEnvironment.AllowPersistentShell = true
+	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
+	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
+	defer r.ClosePersistentShells()
+
+	payload := "subject line\n\nbody line\x1b[118;1:3u"
+	spec := config.CommandSpec{
+		Name:         "hex-arg",
+		Exec:         "/bin/sh",
+		Args:         []string{"-c", `printf %s "$1" | od -An -tx1 | tr -d ' \n'`, "sh", payload},
+		RunMode:      "persistent_shell",
+		Shell:        shellPath,
+		StartupFiles: persistentShellTestStartupFiles(shellPath),
+	}
+	out, err := r.runPersistentShell(context.Background(), spec, spec.Args, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
+	if err != nil {
+		t.Fatalf("run persistent shell: %v", err)
+	}
+	result := shellResultMap(t, out)
+	if timedOut, _ := result["timed_out"].(bool); timedOut {
+		t.Fatalf("expected unsafe-byte argument to complete without timeout, got %#v", result)
+	}
+	wantHex := fmt.Sprintf("%x", payload)
+	if got := strings.TrimSpace(shellResultStdout(t, result)); !strings.Contains(got, wantHex) {
+		t.Fatalf("expected payload hex %q in output, got %q", wantHex, got)
+	}
+}
+
 func TestPersistentShellRunLockHonorsContext(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("persistent shell mode is Unix-only")

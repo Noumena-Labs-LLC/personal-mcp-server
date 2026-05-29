@@ -17,6 +17,8 @@ import (
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/policy"
 )
 
+const managedCommandWaitDelay = 250 * time.Millisecond
+
 type RunArgvArgs struct {
 	Exec string   `json:"exec"`
 	Args []string `json:"args"`
@@ -88,6 +90,7 @@ func (r *Runner) runExec(parentCtx context.Context, execName string, args []stri
 	if runtime.GOOS != "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
+	configureManagedCommand(cmd)
 	var stdout, stderr limitBuffer
 	stdout.Limit = r.Cfg.Limits.MaxCommandOutputBytes
 	stderr.Limit = r.Cfg.Limits.MaxCommandOutputBytes
@@ -157,6 +160,19 @@ func killProcessTree(cmd *exec.Cmd) {
 	}
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	_ = cmd.Process.Kill()
+}
+
+func configureManagedCommand(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	cmd.WaitDelay = managedCommandWaitDelay
+	if cmd.Cancel != nil {
+		cmd.Cancel = func() error {
+			killProcessTree(cmd)
+			return nil
+		}
+	}
 }
 
 type limitBuffer struct {

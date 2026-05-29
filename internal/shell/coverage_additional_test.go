@@ -26,6 +26,15 @@ func TestShellHelperFunctions(t *testing.T) {
 	if got := shellQuote("a'b"); got != `'a'"'"'b'` {
 		t.Fatalf("shellQuote = %q", got)
 	}
+	if got := shellInputQuote("/bin/bash", "a\nb"); got != "$'a\\012b'" {
+		t.Fatalf("shellInputQuote newline = %q", got)
+	}
+	if got := shellInputQuote("/bin/zsh", "\x1b[A"); got != "$'\\033[A'" {
+		t.Fatalf("shellInputQuote escape = %q", got)
+	}
+	if got := shellInputQuote("/bin/sh", "plain text"); got != "'plain text'" {
+		t.Fatalf("shellInputQuote plain = %q", got)
+	}
 	if got := shellQuoteJoin([]string{"a b", "c"}); got != `'a b' 'c'` {
 		t.Fatalf("shellQuoteJoin = %q", got)
 	}
