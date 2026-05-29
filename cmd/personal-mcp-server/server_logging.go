@@ -7,11 +7,10 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 
 	"github.com/noumena-labs-llc/personal-mcp-server/internal/config"
+	"github.com/noumena-labs-llc/personal-mcp-server/internal/logwriter"
 )
 
 func firstNonEmpty(values ...string) string {
@@ -51,7 +50,7 @@ func setupServerLogging(cfg *config.Config, levelOverride, pathOverride string, 
 	closeFn := func() {}
 	duplicateErrors := false
 	if path != "" {
-		rotating, err := newRotatingLogWriter(path, maxBytes, maxBackups)
+		rotating, err := logwriter.NewRotatingFile(path, maxBytes, maxBackups)
 		if err != nil {
 			return nil, err
 		}
@@ -73,161 +72,6 @@ func setupServerLogging(cfg *config.Config, levelOverride, pathOverride string, 
 	log.SetFlags(log.LstdFlags)
 	slog.Debug("server logging configured", "level", levelName, "path", path, "max_bytes", maxBytes, "max_backups", maxBackups, "duplicate_errors_to_stderr", duplicateErrors)
 	return closeFn, nil
-}
-
-type rotatingLogWriter struct {
-	file       *os.File
-	path       string
-	maxBytes   int64
-	maxBackups int
-	sizeBytes  int64
-	queue      chan []byte
-	closeCh    chan struct{}
-	done       chan struct{}
-	closed     atomic.Bool
-	dropped    atomic.Uint64
-	closeErr   atomic.Value
-}
-
-func newRotatingLogWriter(path string, maxBytes int64, maxBackups int) (*rotatingLogWriter, error) {
-	if maxBytes <= 0 {
-		maxBytes = 10 * 1024 * 1024
-	}
-	if maxBackups < 0 {
-		maxBackups = 0
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // local user-selected diagnostic log path.
-	if err != nil {
-		return nil, err
-	}
-	sizeBytes := int64(0)
-	if info, statErr := f.Stat(); statErr == nil {
-		sizeBytes = info.Size()
-	}
-	w := &rotatingLogWriter{file: f, path: path, maxBytes: maxBytes, maxBackups: maxBackups, sizeBytes: sizeBytes, queue: make(chan []byte, 1024), closeCh: make(chan struct{}), done: make(chan struct{})}
-	go w.writeLoop()
-	return w, nil
-}
-
-func (w *rotatingLogWriter) Write(p []byte) (int, error) {
-	if w == nil || w.closed.Load() {
-		return 0, os.ErrClosed
-	}
-	entry := append([]byte(nil), p...)
-	if w.closed.Load() {
-		return 0, os.ErrClosed
-	}
-	select {
-	case w.queue <- entry:
-	default:
-		w.dropped.Add(1)
-	}
-	return len(p), nil
-}
-
-func (w *rotatingLogWriter) Dropped() uint64 {
-	if w == nil {
-		return 0
-	}
-	return w.dropped.Load()
-}
-
-func (w *rotatingLogWriter) writeLoop() {
-	defer close(w.done)
-	for {
-		select {
-		case p := <-w.queue:
-			_ = w.writeSync(p)
-		case <-w.closeCh:
-			w.drainQueue()
-			w.closeFile()
-			return
-		}
-	}
-}
-
-func (w *rotatingLogWriter) drainQueue() {
-	for {
-		select {
-		case p := <-w.queue:
-			_ = w.writeSync(p)
-		default:
-			return
-		}
-	}
-}
-
-func (w *rotatingLogWriter) writeSync(p []byte) error {
-	incoming := int64(len(p))
-	if err := w.rotateIfNeeded(incoming); err != nil {
-		return err
-	}
-	n, err := w.file.Write(p)
-	w.sizeBytes += int64(n)
-	return err
-}
-
-func (w *rotatingLogWriter) Close() error {
-	if w == nil {
-		return nil
-	}
-	if w.closed.CompareAndSwap(false, true) {
-		close(w.closeCh)
-	}
-	if w.done != nil {
-		<-w.done
-	}
-	if v := w.closeErr.Load(); v != nil {
-		if err, ok := v.(error); ok {
-			return err
-		}
-		return fmt.Errorf("unexpected stored diagnostic log close error type %T", v)
-	}
-	return nil
-}
-
-func (w *rotatingLogWriter) closeFile() {
-	if w.file == nil {
-		return
-	}
-	if err := w.file.Close(); err != nil {
-		w.closeErr.Store(err)
-	}
-	w.file = nil
-}
-
-func (w *rotatingLogWriter) rotateIfNeeded(incoming int64) error {
-	if w.file == nil || w.path == "" || w.maxBytes <= 0 {
-		return nil
-	}
-	if w.sizeBytes+incoming <= w.maxBytes {
-		return nil
-	}
-	if err := w.file.Close(); err != nil {
-		return err
-	}
-	if w.maxBackups > 0 {
-		oldest := fmt.Sprintf("%s.%d", w.path, w.maxBackups)
-		_ = os.Remove(oldest)
-		for i := w.maxBackups - 1; i >= 1; i-- {
-			old := fmt.Sprintf("%s.%d", w.path, i)
-			rotated := fmt.Sprintf("%s.%d", w.path, i+1)
-			_ = os.Rename(old, rotated)
-		}
-		_ = os.Rename(w.path, w.path+".1")
-	} else {
-		_ = os.Remove(w.path)
-	}
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) //nolint:gosec // local user-selected diagnostic log path.
-	if err != nil {
-		return err
-	}
-	w.file = f
-	w.sizeBytes = 0
-	return nil
 }
 
 type duplicateErrorHandler struct {
