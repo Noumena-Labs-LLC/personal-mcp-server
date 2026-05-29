@@ -3,6 +3,7 @@ package shell
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -141,6 +142,39 @@ func TestJobReadFlushesPartialLineOnCancel(t *testing.T) {
 		t.Fatalf("cancel job: %v", err)
 	}
 	waitForJobStatus(t, r, jobID, "cancelled")
+
+	result := readTestJob(t, r, jobID, 10)
+	if got, _ := result["stdout_tail"].(string); got != "cancel-partial" {
+		t.Fatalf("expected cancelled job partial output to flush, got %q", got)
+	}
+}
+
+func TestJobCancelCompletesWhenDetachedChildKeepsPipesOpen(t *testing.T) {
+	pythonPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	root := t.TempDir()
+	cfg := shellTestConfig(root)
+	cfg.Limits.CommandTimeoutSeconds = 10
+	cfg.Limits.MaxCommandOutputBytes = 10000
+	cfg.Commands = []config.CommandSpec{{
+		Name: "job",
+		Exec: pythonPath,
+		Args: []string{"-c", `import subprocess, sys, time; sys.stdout.write("cancel-partial"); sys.stdout.flush(); subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"], start_new_session=True); time.sleep(5)`},
+	}}
+	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
+
+	jobID := startTestJob(t, r)
+	waitForJobTail(t, r, jobID, 10, func(tail string) bool { return tail == "cancel-partial" })
+	started := time.Now()
+	if _, err := r.JobCancel(json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, jobID))); err != nil {
+		t.Fatalf("cancel job: %v", err)
+	}
+	waitForJobStatus(t, r, jobID, "cancelled")
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("expected prompt cancellation despite detached child pipe holder, took %s", elapsed)
+	}
 
 	result := readTestJob(t, r, jobID, 10)
 	if got, _ := result["stdout_tail"].(string); got != "cancel-partial" {

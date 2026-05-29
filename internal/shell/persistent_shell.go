@@ -34,6 +34,7 @@ type persistentShell struct {
 	key           string
 	cmd           *exec.Cmd
 	pty           *os.File
+	shellPath     string
 	startupDir    string
 	startupMarker string
 	waitDone      chan struct{}
@@ -68,6 +69,56 @@ func shellQuoteJoin(argv []string) string {
 		parts = append(parts, shellQuote(arg))
 	}
 	return strings.Join(parts, " ")
+}
+
+func shellInputQuote(shellPath, s string) string {
+	if s == "" {
+		return "''"
+	}
+	if !shellInputNeedsEscaping(s) {
+		return shellQuote(s)
+	}
+	if isBashShell(shellPath) || isZshShell(shellPath) {
+		return shellANSIQuote(s)
+	}
+	return shellQuote(s)
+}
+
+func shellInputQuoteJoin(shellPath string, argv []string) string {
+	parts := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		parts = append(parts, shellInputQuote(shellPath, arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellInputNeedsEscaping(s string) bool {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b < 0x20 || b == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func shellANSIQuote(s string) string {
+	var quoted strings.Builder
+	quoted.WriteString("$'")
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		switch {
+		case b == '\\' || b == '\'':
+			quoted.WriteByte('\\')
+			quoted.WriteByte(b)
+		case b >= 0x20 && b <= 0x7e:
+			quoted.WriteByte(b)
+		default:
+			fmt.Fprintf(&quoted, "\\%03o", b)
+		}
+	}
+	quoted.WriteByte('\'')
+	return quoted.String()
 }
 
 func persistentShellEnv(spec config.CommandSpec) []string {
@@ -167,6 +218,7 @@ func (p *persistentShell) initialize(ctx context.Context, startupTimeout, quietP
 	p.key = key
 	p.cmd = cmd
 	p.pty = master
+	p.shellPath = shellPath
 	p.startupDir = startupDir
 	p.startupMarker = startupMarker
 	p.waitDone = make(chan struct{})
@@ -551,7 +603,7 @@ func (p *persistentShell) runUnlocked(runCtx context.Context, cwd string, argv [
 		}
 	}
 	sentinel := "__PERSONAL_MCP_DONE_" + randomHex(12) + "__"
-	script := "(cd " + shellQuote(cwd) + " && " + shellQuoteJoin(argv) + "); " +
+	script := "(cd " + shellInputQuote(p.shellPath, cwd) + " && " + shellInputQuoteJoin(p.shellPath, argv) + "); " +
 		"__personal_mcp_server_status=$?; " +
 		"printf '\\n" + sentinel + ":%s\\n' \"$__personal_mcp_server_status\"\n"
 	if err := p.writeString(runCtx, script); err != nil {
