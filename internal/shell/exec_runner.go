@@ -24,6 +24,10 @@ type RunArgvArgs struct {
 }
 
 func (r *Runner) RunArgv(raw json.RawMessage) (any, error) {
+	return r.runArgv(context.Background(), raw)
+}
+
+func (r *Runner) runArgv(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a RunArgvArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, err
@@ -55,7 +59,7 @@ func (r *Runner) RunArgv(raw json.RawMessage) (any, error) {
 		if !r.Cfg.Approval.Enabled || r.Approver == nil {
 			return nil, fmt.Errorf("command policy requires approval for %s %s, but approval is disabled", a.Exec, policy.JoinArgs(a.Args))
 		}
-		_, err := r.Approver.Request(context.Background(), approval.Request{
+		_, err := r.Approver.Request(ctx, approval.Request{
 			Kind:    "command",
 			Action:  "run",
 			Rule:    decision.Rule,
@@ -68,7 +72,7 @@ func (r *Runner) RunArgv(raw json.RawMessage) (any, error) {
 	default:
 		return nil, fmt.Errorf("command policy returned unknown action %q", decision.Action)
 	}
-	return r.runExec(context.Background(), a.Exec, a.Args, cwd, map[string]string{}, nil, map[string]any{"exec": a.Exec, "args": a.Args, "cwd": a.Cwd, "policy_action": decision.Action, "policy_rule": decision.Rule})
+	return r.runExec(ctx, a.Exec, a.Args, cwd, map[string]string{}, nil, map[string]any{"exec": a.Exec, "args": a.Args, "cwd": a.Cwd, "policy_action": decision.Action, "policy_rule": decision.Rule})
 }
 
 func containsShellSyntax(s string) bool {
