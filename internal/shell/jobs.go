@@ -37,15 +37,7 @@ type commandJob struct {
 	Stderr          *jobOutputStream
 	CancelRequested bool
 	cancel          context.CancelFunc
-
-	// Active is owned by Runner.jobMu. It is true from successful registration
-	// until finishCommandJob marks the job complete.
-	Active bool
 }
-
-// TODO: Audit the jobs locking model. The split between Runner.jobMu and
-// commandJob.mu has grown organically and should be reviewed for clearer
-// ownership boundaries and invariants.
 
 type StartNamedResult struct {
 	JobID     string `json:"job_id"`
@@ -100,29 +92,16 @@ func (r *Runner) StartNamed(raw json.RawMessage) (any, error) {
 		job.Result["project"] = map[string]any{"root": prepared.ProjectState.Root, "trusted": prepared.ProjectState.Trusted}
 	}
 
-	r.jobMu.Lock()
-	if r.jobs == nil {
-		r.jobs = map[string]*commandJob{}
-	}
-	active := r.activeBackgroundJobsLocked()
-	maxJobs := r.maxBackgroundJobs()
-	if maxJobs > 0 && active >= maxJobs {
-		r.jobMu.Unlock()
+	active, maxJobs, registered := r.registerJob(job)
+	if !registered {
 		cancel()
 		job.closeOutputStreams()
 		return backgroundJobsBusyResult(prepared.Args.Name, prepared.Cwd, active, maxJobs), nil
 	}
-	job.Active = true
-	r.jobs[jobID] = job
-	r.jobMu.Unlock()
 
 	go r.runCommandJob(ctx, job, prepared.Spec, prepared.Cwd, prepared.FinalArgs)
 
-	job.mu.Lock()
-	status := job.Status
-	startedAt := job.Started.Format(time.RFC3339)
-	job.mu.Unlock()
-	return StartNamedResult{JobID: job.ID, Name: job.Name, Cwd: job.Cwd, Status: status, StartedAt: startedAt}, nil
+	return job.startResult(), nil
 }
 
 func (r *Runner) maxBackgroundJobs() int {
@@ -141,16 +120,6 @@ func backgroundJobsBusyResult(name, cwd string, active, maxJobs int) map[string]
 		"active_jobs":         active,
 		"max_background_jobs": maxJobs,
 	}
-}
-
-func (r *Runner) activeBackgroundJobsLocked() int {
-	active := 0
-	for _, job := range r.jobs {
-		if job != nil && job.Active {
-			active++
-		}
-	}
-	return active
 }
 
 func (r *Runner) jobOutputLimits() jobOutputLimits {
@@ -196,10 +165,7 @@ func (r *Runner) runCommandJob(parentCtx context.Context, job *commandJob, spec 
 	}
 	job.closeOutputStreams()
 
-	wasCancelled := false
-	job.mu.Lock()
-	wasCancelled = job.CancelRequested || job.Status == "cancelling"
-	job.mu.Unlock()
+	wasCancelled := job.cancelRequested()
 
 	exitCode := 0
 	if waitErr != nil {
@@ -235,6 +201,73 @@ func (r *Runner) runCommandJob(parentCtx context.Context, job *commandJob, spec 
 	r.finishCommandJob(job, status, errText, map[string]any{"exit_code": exitCode, "timed_out": timedOut, "duration_ms": time.Since(started).Milliseconds()})
 }
 
+func (r *Runner) registerJob(job *commandJob) (active, maxJobs int, registered bool) {
+	r.withJobRegistryLock(func() {
+		if r.jobs == nil {
+			r.jobs = map[string]*commandJob{}
+		}
+		active = r.activeJobs
+		maxJobs = r.maxBackgroundJobs()
+		if maxJobs > 0 && active >= maxJobs {
+			return
+		}
+		r.jobs[job.ID] = job
+		r.activeJobs++
+		active = r.activeJobs
+		registered = true
+	})
+	return active, maxJobs, registered
+}
+
+func (r *Runner) lookupJob(jobID string) *commandJob {
+	var job *commandJob
+	r.withJobRegistryLock(func() {
+		job = r.jobs[jobID]
+	})
+	return job
+}
+
+func (r *Runner) snapshotJobs() []*commandJob {
+	var jobs []*commandJob
+	r.withJobRegistryLock(func() {
+		jobs = make([]*commandJob, 0, len(r.jobs))
+		for _, job := range r.jobs {
+			jobs = append(jobs, job)
+		}
+	})
+	return jobs
+}
+
+func (r *Runner) removeFinishedJob(job *commandJob) {
+	if job == nil {
+		return
+	}
+	r.withJobRegistryLock(func() {
+		if r.activeJobs > 0 {
+			r.activeJobs--
+		}
+	})
+}
+
+func (r *Runner) removeExpiredJobs(expired map[string]*commandJob) {
+	if len(expired) == 0 {
+		return
+	}
+	r.withJobRegistryLock(func() {
+		for id, job := range expired {
+			if r.jobs[id] == job {
+				delete(r.jobs, id)
+			}
+		}
+	})
+}
+
+func (r *Runner) withJobRegistryLock(fn func()) {
+	r.jobMu.Lock()
+	defer r.jobMu.Unlock()
+	fn()
+}
+
 func (j *commandJob) closeOutputStreams() {
 	if j.Stdout != nil {
 		j.Stdout.CloseAndFlush()
@@ -251,29 +284,8 @@ func setProcessGroup(cmd *exec.Cmd) {
 }
 
 func (r *Runner) finishCommandJob(job *commandJob, status, errText string, result map[string]any) {
-	now := time.Now().UTC()
-	job.mu.Lock()
-	if job.CancelRequested && (status == "failed" || status == "timed_out") {
-		status = "cancelled"
-		result["timed_out"] = false
-	}
-	if status == "failed" && errText == context.Canceled.Error() {
-		status = "cancelled"
-		result["timed_out"] = false
-	}
-	for k, v := range result {
-		job.Result[k] = v
-	}
-	job.Finished = now
-	job.Status = status
-	job.Err = errText
-	job.mu.Unlock()
-
-	r.jobMu.Lock()
-	if job.Active {
-		job.Active = false
-	}
-	r.jobMu.Unlock()
+	job.finish(status, errText, result)
+	r.removeFinishedJob(job)
 }
 
 type jobOutputWriter struct {
@@ -292,9 +304,7 @@ func (r *Runner) JobStatus(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.jobMu.Lock()
-	job := r.jobs[jobID]
-	r.jobMu.Unlock()
+	job := r.lookupJob(jobID)
 	if job == nil {
 		return nil, fmt.Errorf("unknown job_id %q", jobID)
 	}
@@ -309,9 +319,7 @@ func (r *Runner) JobRead(raw json.RawMessage) (any, error) {
 	if a.TailLines <= 0 {
 		a.TailLines = defaultJobOutputTailLines
 	}
-	r.jobMu.Lock()
-	job := r.jobs[a.JobID]
-	r.jobMu.Unlock()
+	job := r.lookupJob(a.JobID)
 	if job == nil {
 		return nil, fmt.Errorf("unknown job_id %q", a.JobID)
 	}
@@ -323,22 +331,11 @@ func (r *Runner) JobCancel(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.jobMu.Lock()
-	job := r.jobs[jobID]
-	r.jobMu.Unlock()
+	job := r.lookupJob(jobID)
 	if job == nil {
 		return nil, fmt.Errorf("unknown job_id %q", jobID)
 	}
-	job.mu.Lock()
-	alreadyDone := !job.Finished.IsZero()
-	var cancel context.CancelFunc
-	if !alreadyDone {
-		job.CancelRequested = true
-		job.Status = "cancelling"
-		cancel = job.cancel
-	}
-	status := job.Status
-	job.mu.Unlock()
+	status, alreadyDone, cancel := job.requestCancel()
 	if cancel != nil {
 		cancel()
 	}
@@ -353,12 +350,7 @@ func (r *Runner) JobList(raw json.RawMessage) (any, error) {
 		}
 	}
 	r.pruneFinishedJobs(time.Now())
-	r.jobMu.Lock()
-	jobs := make([]*commandJob, 0, len(r.jobs))
-	for _, job := range r.jobs {
-		jobs = append(jobs, job)
-	}
-	r.jobMu.Unlock()
+	jobs := r.snapshotJobs()
 	items := make([]map[string]any, 0, len(jobs))
 	for _, job := range jobs {
 		snapshot := job.snapshot(false, defaultJobOutputTailLines)
@@ -387,63 +379,45 @@ func parseJobID(raw json.RawMessage) (string, error) {
 }
 
 func (r *Runner) pruneFinishedJobs(now time.Time) {
-	r.jobMu.Lock()
-	jobs := make(map[string]*commandJob, len(r.jobs))
-	for id, job := range r.jobs {
-		jobs[id] = job
-	}
-	r.jobMu.Unlock()
+	jobs := r.snapshotJobs()
 
 	expired := make(map[string]*commandJob)
-	for id, job := range jobs {
+	for _, job := range jobs {
 		if job == nil {
 			continue
 		}
-		job.mu.Lock()
-		jobExpired := !job.Finished.IsZero() && now.Sub(job.Finished) > finishedJobRetention
-		job.mu.Unlock()
-		if jobExpired {
-			expired[id] = job
+		if job.isExpired(now) {
+			expired[job.ID] = job
 		}
 	}
-	if len(expired) == 0 {
-		return
-	}
-	r.jobMu.Lock()
-	for id, job := range expired {
-		if r.jobs[id] == job {
-			delete(r.jobs, id)
-		}
-	}
-	r.jobMu.Unlock()
+	r.removeExpiredJobs(expired)
 }
 
 func (j *commandJob) snapshot(includeOutput bool, tailLines int) map[string]any {
-	j.mu.Lock()
-	out := map[string]any{
-		"job_id":     j.ID,
-		"name":       j.Name,
-		"cwd":        j.Cwd,
-		"status":     j.Status,
-		"started_at": j.Started.Format(time.RFC3339),
-	}
-	if !j.Finished.IsZero() {
-		out["finished_at"] = j.Finished.Format(time.RFC3339)
-		out["duration_ms"] = j.Finished.Sub(j.Started).Milliseconds()
-	} else {
-		out["duration_ms"] = time.Since(j.Started).Milliseconds()
-	}
-	if j.Err != "" {
-		out["error"] = j.Err
-	}
-	if j.Result != nil {
-		for _, key := range []string{"exit_code", "timed_out", "timeout_phase", "run_mode", "configured_run_mode", "note"} {
-			if value, ok := j.Result[key]; ok {
-				out[key] = value
+	out := map[string]any{}
+	j.withLock(func() {
+		out["job_id"] = j.ID
+		out["name"] = j.Name
+		out["cwd"] = j.Cwd
+		out["status"] = j.Status
+		out["started_at"] = j.Started.Format(time.RFC3339)
+		if !j.Finished.IsZero() {
+			out["finished_at"] = j.Finished.Format(time.RFC3339)
+			out["duration_ms"] = j.Finished.Sub(j.Started).Milliseconds()
+		} else {
+			out["duration_ms"] = time.Since(j.Started).Milliseconds()
+		}
+		if j.Err != "" {
+			out["error"] = j.Err
+		}
+		if j.Result != nil {
+			for _, key := range []string{"exit_code", "timed_out", "timeout_phase", "run_mode", "configured_run_mode", "note"} {
+				if value, ok := j.Result[key]; ok {
+					out[key] = value
+				}
 			}
 		}
-	}
-	j.mu.Unlock()
+	})
 
 	if includeOutput {
 		if tailLines <= 0 {
@@ -474,4 +448,73 @@ func (j *commandJob) snapshot(includeOutput bool, tailLines int) map[string]any 
 		out["output_available"] = stdoutTail.Available || stderrTail.Available
 	}
 	return out
+}
+
+func (j *commandJob) startResult() StartNamedResult {
+	var result StartNamedResult
+	j.withLock(func() {
+		result = StartNamedResult{
+			JobID:     j.ID,
+			Name:      j.Name,
+			Cwd:       j.Cwd,
+			Status:    j.Status,
+			StartedAt: j.Started.Format(time.RFC3339),
+		}
+	})
+	return result
+}
+
+func (j *commandJob) finish(status, errText string, result map[string]any) {
+	now := time.Now().UTC()
+	j.withLock(func() {
+		if j.CancelRequested && (status == "failed" || status == "timed_out") {
+			status = "cancelled"
+			result["timed_out"] = false
+		}
+		if status == "failed" && errText == context.Canceled.Error() {
+			status = "cancelled"
+			result["timed_out"] = false
+		}
+		for k, v := range result {
+			j.Result[k] = v
+		}
+		j.Finished = now
+		j.Status = status
+		j.Err = errText
+	})
+}
+
+func (j *commandJob) requestCancel() (status string, alreadyDone bool, cancel context.CancelFunc) {
+	j.withLock(func() {
+		alreadyDone = !j.Finished.IsZero()
+		if !alreadyDone {
+			j.CancelRequested = true
+			j.Status = "cancelling"
+			cancel = j.cancel
+		}
+		status = j.Status
+	})
+	return status, alreadyDone, cancel
+}
+
+func (j *commandJob) cancelRequested() bool {
+	var requested bool
+	j.withLock(func() {
+		requested = j.CancelRequested || j.Status == "cancelling"
+	})
+	return requested
+}
+
+func (j *commandJob) isExpired(now time.Time) bool {
+	var expired bool
+	j.withLock(func() {
+		expired = !j.Finished.IsZero() && now.Sub(j.Finished) > finishedJobRetention
+	})
+	return expired
+}
+
+func (j *commandJob) withLock(fn func()) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	fn()
 }
