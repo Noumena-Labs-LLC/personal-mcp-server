@@ -6,7 +6,7 @@ The server reloads TOML periodically. If a new config fails validation, the runn
 
 ## Recommended workflow
 
-1. Start with `tool_catalog_batch`. Call it with startup context flags, or with no arguments to get the recommended startup bundle in one round-trip. Use `tool_catalog_categories` and `tool_catalog_category` only when you want narrower progressive discovery.
+1. Start with `tool_catalog_batch`. Call it with startup context flags, or with no arguments to get the recommended startup bundle in one round-trip. Use resources when your client exposes them; otherwise call `guide_list` and `guide_read` early so guide access is available without extra discovery passes. Use `tool_catalog_categories` and `tool_catalog_category` only when you want narrower progressive discovery.
 2. Call `fs_list_roots` to learn the workspace boundary.
 3. Use `project_info`, `workflow_list`, and `cmd_list_named` with `cwd` before guessing repo commands.
 4. Use `fs_list_dir` or `fs_search_text` to find relevant files; use `fs_tree` and `fs_find` only when `server_info.features.native_find` is true.
@@ -317,7 +317,7 @@ Statuses are `running`, `exited`, `failed`, `timed_out`, and `cancelled`. Finish
 Use this prompt when starting a coding task:
 
 ```text
-Use the personal MCP server tools only inside the configured roots. First call fs_list_roots, then inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file. For edits, use fs_apply_patch for scoped replacements or fs_apply_unified_patch when server_info.features.unified_patch is true; review returned diffs when useful and apply only the intended changes. After edits, use git_diff and an available named command such as just-ci, just-test, or go-test to verify. Do not read denied secret files or request paths outside the configured roots.
+Use the personal MCP server tools only inside the configured roots. Start with tool_catalog_batch and policy_describe. If resources are visible, read personal-mcp://guide/index and personal-mcp://guide/tools; otherwise call guide_list and guide_read first so guide access is available in-tool. Then call fs_list_roots and inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file. For edits, use fs_apply_patch for scoped replacements or fs_apply_unified_patch when server_info.features.unified_patch is true; review returned diffs when useful and apply only the intended changes. After edits, use git_diff and an available named command such as just-ci, just-test, or go-test to verify. Do not read denied secret files or request paths outside the configured roots.
 ```
 
 ## Dynamic command policy
@@ -578,7 +578,7 @@ The server exposes embedded markdown resources for LLM navigation:
 - `personal-mcp://docs/threat-model`
 - `personal-mcp://docs/quality`
 
-Use `resource_list` and `resource_read` when the MCP client does not expose resources directly. Use `project_config_describe` before generating `.personal-mcp-server.toml`, and `setup_guide` when guiding a user through macOS, Linux, Claude Desktop, service, logging, or troubleshooting setup.
+Use `resource_list` and `resource_read` when the MCP client does not expose resources directly. For guide-oriented startup in tool-only clients, call `guide_list` and `guide_read` early instead of relying on later tool discovery. Use `project_config_describe` before generating `.personal-mcp-server.toml`, and `setup_guide` when guiding a user through macOS, Linux, Claude Desktop, service, logging, or troubleshooting setup.
 
 ## LLM guide discovery tools
 
@@ -589,7 +589,7 @@ Some MCP clients expose tools but not resources to the model. Use these tools fo
 - `project_config_describe` returns the project config guide directly.
 - `setup_guide` returns setup guidance by topic.
 
-`cmd_list_named`, `project_info`, `workflow_list`, `policy_describe`, `resource_list`, and `resource_read` are read-only discovery tools intended to be available at session start.
+`cmd_list_named`, `project_info`, `workflow_list`, `policy_describe`, `resource_list`, `resource_read`, `guide_list`, and `guide_read` are read-only discovery tools intended to be available at session start.
 
 ## Git status
 

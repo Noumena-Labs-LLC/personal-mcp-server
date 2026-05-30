@@ -125,3 +125,12 @@ func TestNotificationIsAcceptedBySDKHandler(t *testing.T) {
 		t.Fatalf("expected 2xx, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestDefaultInstructionsMentionGuideToolsForToolOnlyClients(t *testing.T) {
+	instructions := defaultInstructions()
+	for _, want := range []string{"tool_catalog_batch", "guide_list", "guide_read"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("default instructions missing %q: %s", want, instructions)
+		}
+	}
+}

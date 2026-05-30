@@ -81,7 +81,7 @@ Explicit config entries still win. If a tool or policy is explicitly set to `pro
 
 ## Tool overview
 
-The tool surface is fixed in Go code. TOML can enable or disable tools and override descriptions, but it cannot invent arbitrary tools. MCP `tools/list` is flat; use `tool_catalog_batch` for a one-call startup bundle, or `tool_catalog_categories` and `tool_catalog_category` for progressive discovery.
+The tool surface is fixed in Go code. TOML can enable or disable tools and override descriptions, but it cannot invent arbitrary tools. MCP `tools/list` is flat; use `tool_catalog_batch` for a one-call startup bundle, then use resources when your client exposes them and `guide_list`/`guide_read` when it does not.
 
 Major tool families include:
 

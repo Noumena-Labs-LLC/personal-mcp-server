@@ -2,8 +2,8 @@
 
 Start with discovery:
 
-1. Call `tool_catalog_batch` first. Use it with explicit categories when needed, or with no arguments for the recommended startup bundle plus startup context in one round-trip. Read `personal-mcp://server` and `personal-mcp://policy` when resources are available. Use `tool_catalog_category` only for narrower follow-up discovery, and `tool_catalog_all` only when a complete catalog is needed.
-2. Read `personal-mcp://roots`, `personal-mcp://guide/index`, and `personal-mcp://guide/tools`.
+1. Call `tool_catalog_batch` first. Use it with explicit categories when needed, or with no arguments for the recommended startup bundle plus startup context in one round-trip. Read `personal-mcp://server` and `personal-mcp://policy` when resources are available. If resources are not visible, call `guide_list` and `guide_read` immediately so guide access is available through tools without another discovery round-trip. Use `tool_catalog_category` only for narrower follow-up discovery, and `tool_catalog_all` only when a complete catalog is needed.
+2. Read `personal-mcp://roots`, `personal-mcp://guide/index`, and `personal-mcp://guide/tools` when resources are available.
 3. Use `project_info` and `workflow_list` with `cwd` before guessing project commands.
 4. Use read-only resources for context and tools for actions.
 
@@ -50,7 +50,7 @@ Approval workflow:
 - The server does not show a native OS or Claude Desktop dialog. The local user can inspect and decide approvals through the approval CLI (`personal-mcp-server approvals watch/list/approve/deny`) or local approval HTTP endpoints.
 
 
-When MCP resources are not visible to the model, use `guide_read` instead of `personal-mcp://guide/*` URIs. MCP `tools/list` is flat; prefer `tool_catalog_batch` for grouped startup discovery, then `tool_catalog_category` only when you need a narrower follow-up view. `tool_catalog_all` returns the full catalog, and `tool_catalog` remains a compatibility alias. Some tools described in guides are feature-gated; check `server_info.features`, `policy_describe.cwd.disabled_tools`, or catalog `enabled` fields before using them.
+When MCP resources are not visible to the model, use `guide_list` and `guide_read` instead of `personal-mcp://guide/*` URIs. MCP `tools/list` is flat; prefer `tool_catalog_batch` for grouped startup discovery, then `tool_catalog_category` only when you need a narrower follow-up view. `tool_catalog_all` returns the full catalog, and `tool_catalog` remains a compatibility alias. Some clients may still drop infrequently used tools under long-context pressure; if guide tools disappear from the active tool set, refresh discovery and restore them before continuing. Some tools described in guides are feature-gated; check `server_info.features`, `policy_describe.cwd.disabled_tools`, or catalog `enabled` fields before using them.
 
 
 ## Structured JSON and JSONL navigation
