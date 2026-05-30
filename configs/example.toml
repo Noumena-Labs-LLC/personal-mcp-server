@@ -517,7 +517,9 @@ Use personal MCP server carefully.
 
 Rules:
 - Work only inside the configured roots.
-- Start by calling tool_catalog_batch for startup discovery, or reading personal-mcp://policy and personal-mcp://guide/tools.
+- Start by calling tool_catalog_batch for startup discovery.
+- If resources are visible, read personal-mcp://policy and personal-mcp://guide/tools.
+- If resources are not visible, call guide_list and guide_read first.
 - Search before reading broadly.
 - Read bounded line ranges, not huge files.
 - Do not request denied secret files.
@@ -534,7 +536,7 @@ template = """
 Inspect the project using personal MCP server without modifying files.
 
 Workflow:
-1. Call tool_catalog_batch, then read personal-mcp://roots and personal-mcp://guide/tools when resources are available.
+1. Call tool_catalog_batch, then read personal-mcp://roots and personal-mcp://guide/tools when resources are available, or call guide_list and guide_read when they are not.
 2. Use fs_list_dir to understand the top-level structure.
 3. Use fs_search_text to find relevant files or symbols.
 4. Use fs_get_file_info before reading unknown files and fs_tail_file for recent log output.
@@ -550,13 +552,14 @@ template = """
 Make the requested code change using personal MCP server.
 
 Workflow:
-1. Call tool_catalog_batch and policy_describe, then stay inside configured roots.
-2. Inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file.
-3. Use fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful, and review the diff.
-4. Apply the patch only when the intended change is clear.
-5. Call git_diff to review the final diff.
-6. Run an available named or policy-allowed verification command such as just-ci, just-test, go-test, go-vet, or cmd_run_argv when allowed.
-7. Summarize files changed and verification results.
+1. Call tool_catalog_batch and policy_describe, then read personal-mcp://guide/tools when resources are available or call guide_list and guide_read when they are not.
+2. Stay inside configured roots.
+3. Inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file.
+4. Use fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful, and review the diff.
+5. Apply the patch only when the intended change is clear.
+6. Call git_diff to review the final diff.
+7. Run an available named or policy-allowed verification command such as just-ci, just-test, go-test, go-vet, or cmd_run_argv when allowed.
+8. Summarize files changed and verification results.
 """
 
 # Tools that accept paths also accept optional cwd and path_mode. cwd is per-call only and must resolve inside roots. path_mode can be auto, absolute, root_relative, or cwd_relative.

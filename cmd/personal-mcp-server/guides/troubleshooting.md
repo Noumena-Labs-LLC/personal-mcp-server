@@ -11,11 +11,13 @@ personal-mcp-server doctor --config ~/.personal-mcp-server/config/config.toml
 Common issues:
 
 - Claude Desktop does not show tools: restart Claude Desktop after config/tool changes.
+- Claude Desktop shows file tools but not guide tools: call `tool_catalog_batch` again, then `guide_list`; some tool-only clients defer lower-frequency tools until discovery is refreshed.
 - Unauthorized: check bearer token and `Authorization: Bearer ...` header.
 - Forbidden host/origin: keep Host and Origin on localhost/127.0.0.1 unless explicitly configured.
 - File denied: call `file_explain_policy` and inspect `personal-mcp://policy`.
 - Command denied: call `cmd_explain_policy` and inspect `cmd_list_named`.
 - Large read timeouts: use `fs_get_file_info`, `fs_tail_file`, `fs_search_text`, and bounded `fs_read_file` line windows.
+- Long inline commit messages time out through a persistent-shell client command: prefer a file-backed commit-message helper when your client or project config provides one.
 - Project commands missing: call `project_info` and verify the project config is discovered and trusted.
 
 For bug reports, include version, OS, config summary with secrets redacted, the relevant tool call, and a short audit tail if safe to share.

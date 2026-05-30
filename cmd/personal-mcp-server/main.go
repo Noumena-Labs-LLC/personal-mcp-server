@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const version = "0.5.13"
+const version = "0.5.14"
 
 //go:embed guides/*.md
 var guideFS embed.FS
