@@ -164,6 +164,21 @@ func (t *Tools) ApplyPatchContext(ctx context.Context, raw json.RawMessage) (any
 	return t.allowPolicyCopy().ApplyPatch(raw)
 }
 
+func (t *Tools) EditLinesContext(ctx context.Context, raw json.RawMessage) (any, error) {
+	var a EditLinesArgs
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return nil, err
+	}
+	p, displayPath, err := t.resolvePath(a.Path, a.Cwd, a.PathMode)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.enforceFilePolicyContext(ctx, "patch", displayPath, p, map[string]any{"tool": "fs_edit_lines", "cwd": a.Cwd, "operation": a.Operation, "line": a.Line, "end_line": a.EndLine, "dry_run": a.DryRun}); err != nil {
+		return nil, err
+	}
+	return t.allowPolicyCopy().EditLines(raw)
+}
+
 func (t *Tools) ReplaceRegexContext(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a ReplaceRegexArgs
 	if err := json.Unmarshal(raw, &a); err != nil {

@@ -200,6 +200,8 @@ enabled = true
 enabled = false
 [tools.fs_apply_patch]
 enabled = false
+[tools.fs_edit_lines]
+enabled = false
 [tools.fs_apply_unified_patch]
 enabled = false
 [tools.fs_create_file]
@@ -362,21 +364,21 @@ description = "Create a commit from staged changes. This may fail if no commit m
 enabled = true
 description = "Safely inspect, patch, and verify code inside allowed roots."
 template = """
-Use personal MCP server carefully. Start by calling tool_catalog_batch and policy_describe. If resources are visible, read personal-mcp://server, personal-mcp://policy, and personal-mcp://guide/tools; otherwise call guide_list and guide_read first. Work only inside configured roots. Prefer resources for read-only context when available. Search before reading broadly. For large files, never request whole_file=true unless the user explicitly needs the entire file; prefer fs_get_file_info, fs_tail_file, fs_search_text, and fs_read_file with start_line/max_lines. Only global config can raise max_read_bytes. Use fs_apply_patch or fs_apply_unified_patch for scoped edits; review fs_apply_patch warnings when found counts differ and re-read before retrying zero-match edits. After edits, use git_diff and an allowed verification command when available. If approval is required, explain why and ask the local user to use personal-mcp-server approvals watch/list plus approve/deny; no native OS dialog is shown.
+Use personal MCP server carefully. Start by calling tool_catalog_batch and policy_describe. If resources are visible, read personal-mcp://server, personal-mcp://policy, and personal-mcp://guide/tools; otherwise call guide_list and guide_read first. Work only inside configured roots. Prefer resources for read-only context when available. Search before reading broadly. For large files, never request whole_file=true unless the user explicitly needs the entire file; prefer fs_get_file_info, fs_tail_file, fs_search_text, and fs_read_file with start_line/max_lines. Set fs_get_file_info count_lines=true when a workflow needs an exact line count. Only global config can raise max_read_bytes. Use fs_edit_lines for line-number anchored edits, fs_apply_patch for scoped text edits, or fs_apply_unified_patch for unified diffs; review fs_apply_patch warnings when found counts differ and re-read before retrying zero-match edits. After edits, use git_diff and an allowed verification command when available. If approval is required, explain why and ask the local user to use personal-mcp-server approvals watch/list plus approve/deny; no native OS dialog is shown.
 """
 
 [prompts.inspect_project]
 enabled = true
 description = "Read-only project inspection workflow."
 template = """
-Inspect the project without modifying files. Call tool_catalog_batch and policy_describe first. Use resources such as personal-mcp://roots, personal-mcp://policy, and personal-mcp://guide/tools when available; otherwise call guide_list and guide_read. Use fs_list_dir, fs_search_text, fs_get_file_info, and fs_read_file as needed. Do not call fs_apply_patch, fs_create_file, fs_replace_file, fs_delete_file, fs_delete_files, fs_move_file, fs_create_dir, cmd_run_named, cmd_run_sequence, or cmd_run_argv.
+Inspect the project without modifying files. Call tool_catalog_batch and policy_describe first. Use resources such as personal-mcp://roots, personal-mcp://policy, and personal-mcp://guide/tools when available; otherwise call guide_list and guide_read. Use fs_list_dir, fs_search_text, fs_get_file_info, and fs_read_file as needed. Do not call fs_edit_lines, fs_apply_patch, fs_create_file, fs_replace_file, fs_delete_file, fs_delete_files, fs_move_file, fs_create_dir, cmd_run_named, cmd_run_sequence, or cmd_run_argv.
 """
 
 [prompts.edit_and_verify]
 enabled = true
 description = "Make a scoped edit, show the diff, and run configured verification commands."
 template = """
-Inspect relevant files after calling tool_catalog_batch. If resources are visible, read personal-mcp://guide/tools; otherwise call guide_list and guide_read. Apply the intended scoped edit, then review git_diff and run an available named or policy-allowed verification command. Use dry_run only when a preview is useful. Treat fs_apply_patch warnings as review signals and retry zero-match edits only after re-reading. If a command or file operation requires approval, explain why it is needed and ask the local user to use personal-mcp-server approvals watch/list plus approve/deny.
+Inspect relevant files after calling tool_catalog_batch. If resources are visible, read personal-mcp://guide/tools; otherwise call guide_list and guide_read. Apply the intended line-based or scoped edit, then review git_diff and run an available named or policy-allowed verification command. Use dry_run only when a preview is useful. Treat fs_apply_patch warnings as review signals and retry zero-match edits only after re-reading. If a command or file operation requires approval, explain why it is needed and ask the local user to use personal-mcp-server approvals watch/list plus approve/deny.
 """
 `, root, authLine, strings.ReplaceAll(defaultTrustStorePath(), "\\", "\\\\"))
 }

@@ -21,10 +21,24 @@ func splitLines(s string) []string {
 	if s == "" {
 		return nil
 	}
-	return strings.SplitAfter(s, "\n")
+	lines := strings.SplitAfter(s, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func formatSingleRegionUnifiedDiff(path string, oldLines, newLines []string, contextLines int, maxBytes int64) (string, bool) {
+	return formatSingleRegionUnifiedDiffAt(path, oldLines, newLines, contextLines, maxBytes, 1, 1)
+}
+
+func formatSingleRegionUnifiedDiffAt(path string, oldLines, newLines []string, contextLines int, maxBytes int64, oldBaseLine, newBaseLine int) (string, bool) {
+	if oldBaseLine <= 0 {
+		oldBaseLine = 1
+	}
+	if newBaseLine <= 0 {
+		newBaseLine = 1
+	}
 	prefix := commonPrefixLines(oldLines, newLines)
 	suffix := commonSuffixLines(oldLines[prefix:], newLines[prefix:])
 	oldChangeStart := prefix
@@ -39,7 +53,7 @@ func formatSingleRegionUnifiedDiff(path string, oldLines, newLines []string, con
 	var b strings.Builder
 	b.WriteString("--- " + path + "\n")
 	b.WriteString("+++ " + path + "\n")
-	fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", oldHunkStart+1, oldHunkEnd-oldHunkStart, newHunkStart+1, newHunkEnd-newHunkStart)
+	fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", oldBaseLine+oldHunkStart, oldHunkEnd-oldHunkStart, newBaseLine+newHunkStart, newHunkEnd-newHunkStart)
 	for _, line := range oldLines[oldHunkStart:oldChangeStart] {
 		b.WriteByte(' ')
 		b.WriteString(ensureNL(line))

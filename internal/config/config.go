@@ -71,6 +71,7 @@ type ToolConfig struct {
 	Tree                          ToolSpec `toml:"fs_tree"`
 	ReplaceRegex                  ToolSpec `toml:"fs_replace_regex"`
 	ApplyPatch                    ToolSpec `toml:"fs_apply_patch"`
+	EditLines                     ToolSpec `toml:"fs_edit_lines"`
 	ApplyUnifiedPatch             ToolSpec `toml:"fs_apply_unified_patch"`
 	RunCommand                    ToolSpec `toml:"cmd_run_named"`
 	RunSequence                   ToolSpec `toml:"cmd_run_sequence"`
@@ -408,6 +409,7 @@ func allToolNames() []string {
 		"fs_tree",
 		"fs_replace_regex",
 		"fs_apply_patch",
+		"fs_edit_lines",
 		"fs_apply_unified_patch",
 		"cmd_run_named",
 		"cmd_run_sequence",
@@ -520,6 +522,8 @@ func (c *Config) setToolEnabled(name string, enabled bool) {
 		c.Tools.ReplaceRegex.Enabled = enabled
 	case "fs_apply_patch":
 		c.Tools.ApplyPatch.Enabled = enabled
+	case "fs_edit_lines":
+		c.Tools.EditLines.Enabled = enabled
 	case "fs_apply_unified_patch":
 		c.Tools.ApplyUnifiedPatch.Enabled = enabled
 	case "cmd_run_named":
@@ -959,6 +963,8 @@ func (c *Config) ToolDescription(name, fallback string) string {
 		return firstNonEmpty(c.Tools.ReplaceRegex.Description, fallback)
 	case "fs_apply_patch":
 		return firstNonEmpty(c.Tools.ApplyPatch.Description, fallback)
+	case "fs_edit_lines":
+		return firstNonEmpty(c.Tools.EditLines.Description, fallback)
 	case "fs_apply_unified_patch":
 		return firstNonEmpty(c.Tools.ApplyUnifiedPatch.Description, fallback)
 	case "cmd_list_named":

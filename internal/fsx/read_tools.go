@@ -14,9 +14,10 @@ import (
 )
 
 type PathArgs struct {
-	Path     string `json:"path"`
-	Cwd      string `json:"cwd"`
-	PathMode string `json:"path_mode"`
+	Path       string `json:"path"`
+	Cwd        string `json:"cwd"`
+	PathMode   string `json:"path_mode"`
+	CountLines bool   `json:"count_lines"`
 }
 
 func (t *Tools) GetFileInfo(raw json.RawMessage) (any, error) {
@@ -59,6 +60,21 @@ func (t *Tools) GetFileInfo(raw json.RawMessage) (any, error) {
 		out["suggested_tools"] = largeFileSuggestedTools()
 		if sniffErr != nil {
 			out["sniff_error"] = sniffErr.Error()
+		}
+		if a.CountLines {
+			switch {
+			case sniffErr != nil:
+				out["line_count_error"] = sniffErr.Error()
+			case !isText:
+				out["line_count_error"] = errBinaryFile.Error()
+			default:
+				lineCount, countErr := exactTextLineCount(p)
+				if countErr != nil {
+					out["line_count_error"] = countErr.Error()
+				} else {
+					out["line_count"] = lineCount
+				}
+			}
 		}
 	}
 	return out, nil

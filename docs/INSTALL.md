@@ -117,6 +117,8 @@ Enable the mutation and command tools you actually want in the same global confi
 ```toml
 [tools.fs_apply_patch]
 enabled = true
+[tools.fs_edit_lines]
+enabled = true
 [tools.fs_apply_unified_patch]
 enabled = true
 [tools.fs_create_file]
