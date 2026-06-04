@@ -603,13 +603,44 @@ func (p *persistentShell) runUnlocked(runCtx context.Context, cwd string, argv [
 		}
 	}
 	sentinel := "__PERSONAL_MCP_DONE_" + randomHex(12) + "__"
-	script := "(cd " + shellInputQuote(p.shellPath, cwd) + " && " + shellInputQuoteJoin(p.shellPath, argv) + "); " +
-		"__personal_mcp_server_status=$?; " +
-		"printf '\\n" + sentinel + ":%s\\n' \"$__personal_mcp_server_status\"\n"
-	if err := p.writeString(runCtx, script); err != nil {
+	stagedPath, stageErr := stagePersistentShellCommand(p.shellPath, cwd, argv, sentinel)
+	if stageErr != nil {
+		return "", false, -1, stageErr
+	}
+	defer func() {
+		_ = os.Remove(stagedPath)
+	}()
+	invoke := ". " + shellQuote(stagedPath) + "\n"
+	if err := p.writeString(runCtx, invoke); err != nil {
 		return "", false, -1, persistentShellWriteError{err: err}
 	}
 	return p.readUntilSentinel(runCtx, sentinel, maxOutput)
+}
+
+func stagePersistentShellCommand(shellPath, cwd string, argv []string, sentinel string) (string, error) {
+	script, err := os.CreateTemp("", "personal-mcp-persistent-shell-*.sh")
+	if err != nil {
+		return "", err
+	}
+	path := script.Name()
+	body := "(cd " + shellInputQuote(shellPath, cwd) + " && " + shellInputQuoteJoin(shellPath, argv) + ")\n" +
+		"__personal_mcp_server_status=$?\n" +
+		"printf '\\n" + sentinel + ":%s\\n' \"$__personal_mcp_server_status\"\n"
+	if _, err := script.WriteString(body); err != nil {
+		_ = script.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := script.Chmod(0o600); err != nil {
+		_ = script.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := script.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 func (p *persistentShell) writeString(ctx context.Context, s string) error {

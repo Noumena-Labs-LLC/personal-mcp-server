@@ -486,6 +486,53 @@ func TestPersistentShellHandlesUnsafeArgumentBytes(t *testing.T) {
 	}
 }
 
+func TestPersistentShellStagesLongMultilineArguments(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("persistent shell mode is Unix-only")
+	}
+	shellPath := "/bin/zsh"
+	if _, err := os.Stat(shellPath); err != nil {
+		if _, bashErr := os.Stat("/bin/bash"); bashErr != nil {
+			t.Skip("no supported interactive test shell available")
+		}
+		shellPath = "/bin/bash"
+	}
+	root := t.TempDir()
+	cfg := shellTestConfig(root)
+	cfg.Limits.CommandTimeoutSeconds = 5
+	cfg.Limits.MaxCommandOutputBytes = 20000
+	cfg.CommandEnvironment.AllowPersistentShell = true
+	cfg.CommandEnvironment.AllowedShells = []string{shellPath}
+	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
+	defer r.ClosePersistentShells()
+
+	bodyLines := make([]string, 0, 120)
+	for i := 0; i < 120; i++ {
+		bodyLines = append(bodyLines, fmt.Sprintf("line %03d: bullets - unicode ok - 'quoted' text", i))
+	}
+	payload := "subject line\n\n" + strings.Join(bodyLines, "\n")
+	spec := config.CommandSpec{
+		Name:         "long-hex-arg",
+		Exec:         "/bin/sh",
+		Args:         []string{"-c", `printf %s "$1" | od -An -tx1 | tr -d ' \n'`, "sh", payload},
+		RunMode:      "persistent_shell",
+		Shell:        shellPath,
+		StartupFiles: persistentShellTestStartupFiles(shellPath),
+	}
+	out, err := r.runPersistentShell(context.Background(), spec, spec.Args, root, "project", project.State{Found: true, Trusted: true, Root: root}, map[string]any{})
+	if err != nil {
+		t.Fatalf("run persistent shell: %v", err)
+	}
+	result := shellResultMap(t, out)
+	if timedOut, _ := result["timed_out"].(bool); timedOut {
+		t.Fatalf("expected long multiline argument to complete without timeout, got %#v", result)
+	}
+	wantHex := fmt.Sprintf("%x", payload)
+	if got := strings.TrimSpace(shellResultStdout(t, result)); !strings.Contains(got, wantHex) {
+		t.Fatalf("expected payload hex %q in output, got %q", wantHex, got)
+	}
+}
+
 func TestPersistentShellRunLockHonorsContext(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("persistent shell mode is Unix-only")
