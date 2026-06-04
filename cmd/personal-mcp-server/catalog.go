@@ -128,6 +128,7 @@ func toolCatalogAll(cfg *config.Config) map[string]any {
 			Tools: []toolCatalogEntry{
 				{Name: "file_explain_policy", Purpose: "Explain whether a file operation would be allowed, denied, or approval-gated.", Enabled: true, ReadOnly: true},
 				{Name: "fs_apply_patch", Purpose: "Apply exact old/new text replacements to one file.", Enabled: cfg.Tools.ApplyPatch.Enabled, ReadOnly: false, SafetyNotes: "Supports dry_run for optional preview."},
+				{Name: "fs_edit_lines", Purpose: "Edit anchored line ranges by line number with optional text guards.", Enabled: cfg.Tools.EditLines.Enabled, ReadOnly: false, SafetyNotes: "Supports dry_run and keeps simple line edits out of whole-file patch text."},
 				{Name: "fs_apply_unified_patch", Purpose: "Apply a standard unified diff patch.", Enabled: cfg.Tools.ApplyUnifiedPatch.Enabled, ReadOnly: false, RequiresFeature: "unified_patch", SafetyNotes: "Deletes/renames/binary patches are rejected."},
 				{Name: "fs_replace_regex", Purpose: "Perform Go-native regex replacement in one file.", Enabled: cfg.Tools.ReplaceRegex.Enabled, ReadOnly: false, RequiresFeature: "regex_replace", SafetyNotes: "Supports optional dry_run and replacement caps."},
 				{Name: "fs_create_file", Purpose: "Create a new text file.", Enabled: cfg.Tools.CreateFile.Enabled, ReadOnly: false},

@@ -10,9 +10,9 @@ The server reloads TOML periodically. If a new config fails validation, the runn
 2. Call `fs_list_roots` to learn the workspace boundary.
 3. Use `project_info`, `workflow_list`, and `cmd_list_named` with `cwd` before guessing repo commands.
 4. Use `fs_list_dir` or `fs_search_text` to find relevant files; use `fs_tree` and `fs_find` only when `server_info.features.native_find` is true.
-5. Use `fs_get_file_info` before reading large or unknown files.
+5. Use `fs_get_file_info` before reading large or unknown files; set `count_lines=true` when you need an exact line count for a line-anchored edit workflow.
 6. Use `fs_read_file` with a bounded line range; avoid `whole_file=true` on large files unless explicitly needed.
-7. Use `fs_apply_patch` for scoped edits; optionally use `dry_run=true` when a preview is useful. Use `fs_apply_unified_patch` only when `server_info.features.unified_patch` is true.
+7. Use `fs_edit_lines` for simple line-number anchored inserts, replacements, and deletes with optional `line_starts_with` guards. Use `fs_apply_patch` for scoped edits; optionally use `dry_run=true` when a preview is useful. Use `fs_apply_unified_patch` only when `server_info.features.unified_patch` is true.
 8. Apply the patch only after reviewing the diff.
 9. Use `git_status`, `git_diff`, and named test/lint commands to verify.
 
@@ -80,6 +80,15 @@ Arguments:
 ```json
 {
   "path": "personal-mcp-server/README.md"
+}
+```
+
+Optional exact line count:
+
+```json
+{
+  "path": "personal-mcp-server/README.md",
+  "count_lines": true
 }
 ```
 
@@ -223,6 +232,46 @@ Multiple edits:
 Notes:
 
 - Use `dry_run=true` when you want a preview before writing.
+
+### `fs_edit_lines`
+
+Edits a file by anchored line number instead of exact old/new text. Use this when
+you know the target line range and want an optional literal guard against
+off-by-one mistakes.
+
+Replace one line range:
+
+```json
+{
+  "path": "personal-mcp-server/README.md",
+  "operation": "replace",
+  "line": 12,
+  "end_line": 14,
+  "line_starts_with": "## Usage",
+  "content": "## Usage\nUpdated body\n",
+  "dry_run": true
+}
+```
+
+Insert after an anchor:
+
+```json
+{
+  "path": "personal-mcp-server/README.md",
+  "operation": "insert_after",
+  "line": 12,
+  "line_starts_with": "## Usage",
+  "content": "\nExtra note.\n",
+  "dry_run": true
+}
+```
+
+Notes:
+
+- Supported operations are `replace`, `insert_before`, `insert_after`, and `delete`.
+- `line` is always required. `end_line` is only used for `replace` and `delete`.
+- `line_starts_with` is a literal prefix check, not a regex.
+- `dry_run=true` returns the diff preview without writing.
 - Exact matches and `expected_replacements` reduce accidental broad edits.
 - `expected_replacements` is optional and defaults to `1`. It is a replacement cap, not an exact-match precondition: if more matches exist, the first N are replaced and the response includes a warning; if fewer matches exist, all found matches are replaced and the response includes a warning.
 - If the `old` text is not found at all, the edit is rejected; re-read the target range before retrying.
@@ -317,7 +366,7 @@ Statuses are `running`, `exited`, `failed`, `timed_out`, and `cancelled`. Finish
 Use this prompt when starting a coding task:
 
 ```text
-Use the personal MCP server tools only inside the configured roots. Start with tool_catalog_batch and policy_describe. If resources are visible, read personal-mcp://guide/index and personal-mcp://guide/tools; otherwise call guide_list and guide_read first so guide access is available in-tool. Then call fs_list_roots and inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file. For edits, use fs_apply_patch for scoped replacements or fs_apply_unified_patch when server_info.features.unified_patch is true; review returned diffs when useful and apply only the intended changes. After edits, use git_diff and an available named command such as just-ci, just-test, or go-test to verify. Do not read denied secret files or request paths outside the configured roots.
+Use the personal MCP server tools only inside the configured roots. Start with tool_catalog_batch and policy_describe. If resources are visible, read personal-mcp://guide/index and personal-mcp://guide/tools; otherwise call guide_list and guide_read first so guide access is available in-tool. Then call fs_list_roots and inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file. For edits, use fs_edit_lines for line-number anchored changes, fs_apply_patch for scoped replacements, or fs_apply_unified_patch when server_info.features.unified_patch is true; review returned diffs when useful and apply only the intended changes. After edits, use git_diff and an available named command such as just-ci, just-test, or go-test to verify. Do not read denied secret files or request paths outside the configured roots.
 ```
 
 ## Dynamic command policy

@@ -88,9 +88,14 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 			return out, err
 		}})
 	}
-	pathSchema := map[string]any{
-		"type":                 "object",
-		"properties":           map[string]any{"path": map[string]any{"type": "string"}, "cwd": map[string]any{"type": "string"}, "path_mode": pathModeSchema()},
+	fileInfoSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":        map[string]any{"type": "string"},
+			"cwd":         map[string]any{"type": "string"},
+			"path_mode":   pathModeSchema(),
+			"count_lines": map[string]any{"type": "boolean"},
+		},
 		"additionalProperties": false,
 	}
 	if discoveryToolsEnabled() {
@@ -235,7 +240,7 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 		}, Handler: ft.ListDir, ContextHandler: ft.ListDirContext})
 	}
 	if cfg.Tools.GetFileInfo.Enabled {
-		s.Register(mcphttp.Tool{Name: "fs_get_file_info", Description: cfg.ToolDescription("fs_get_file_info", "Get safe metadata for a file or directory inside configured roots without reading contents, including size, text sniffing, line estimate, and large-file navigation hints."), InputSchema: pathSchema, Handler: ft.GetFileInfo})
+		s.Register(mcphttp.Tool{Name: "fs_get_file_info", Description: cfg.ToolDescription("fs_get_file_info", "Get safe metadata for a file or directory inside configured roots without reading contents, including size, text sniffing, line estimate, and optional exact line counts when count_lines=true."), InputSchema: fileInfoSchema, Handler: ft.GetFileInfo})
 	}
 	if cfg.Tools.TailFile.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_tail_file", Description: cfg.ToolDescription("fs_tail_file", "Read the last lines of a text or log file inside configured roots without scanning the whole file. Use this for large logs and recent diagnostics."), InputSchema: map[string]any{
@@ -291,6 +296,23 @@ func registerTools(s *mcphttp.Server, cfg *config.Config, ft *fsx.Tools, r *shel
 				"dry_run": map[string]any{"type": "boolean"}, "create_backup": map[string]any{"type": "boolean"},
 			},
 		}, Handler: ft.ApplyPatch, ContextHandler: ft.ApplyPatchContext})
+	}
+	if cfg.Tools.EditLines.Enabled {
+		s.Register(mcphttp.Tool{Name: "fs_edit_lines", Description: cfg.ToolDescription("fs_edit_lines", "Edit one anchored line location or line range inside configured roots. Supports replace, insert_before, insert_after, and delete, with an optional literal line_starts_with guard, dry_run previews, and compact diffs."), InputSchema: map[string]any{
+			"type": "object", "required": []string{"path", "operation", "line"}, "additionalProperties": false,
+			"properties": map[string]any{
+				"path":             map[string]any{"type": "string"},
+				"cwd":              map[string]any{"type": "string"},
+				"path_mode":        pathModeSchema(),
+				"operation":        map[string]any{"type": "string", "enum": []string{"replace", "insert_before", "insert_after", "delete"}},
+				"line":             map[string]any{"type": "integer", "minimum": 1},
+				"end_line":         map[string]any{"type": "integer", "minimum": 1},
+				"content":          map[string]any{"type": "string"},
+				"line_starts_with": map[string]any{"type": "string"},
+				"dry_run":          map[string]any{"type": "boolean"},
+				"create_backup":    map[string]any{"type": "boolean"},
+			},
+		}, Handler: ft.EditLines, ContextHandler: ft.EditLinesContext})
 	}
 	if cfg.Tools.ApplyUnifiedPatch.Enabled {
 		s.Register(mcphttp.Tool{Name: "fs_apply_unified_patch", Description: cfg.ToolDescription("fs_apply_unified_patch", "Apply a standard unified diff patch inside configured roots. Supports optional dry_run and rejects deletes, renames, binary patches, and paths outside roots."), InputSchema: map[string]any{

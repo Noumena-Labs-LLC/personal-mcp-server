@@ -246,6 +246,7 @@ func Describe(c *config.Config, roots []string, serverVersion string) map[string
 		"fs_tree":                       c.Tools.Tree.Enabled,
 		"fs_replace_regex":              c.Tools.ReplaceRegex.Enabled,
 		"fs_apply_patch":                c.Tools.ApplyPatch.Enabled,
+		"fs_edit_lines":                 c.Tools.EditLines.Enabled,
 		"fs_apply_unified_patch":        c.Tools.ApplyUnifiedPatch.Enabled,
 		"fs_create_file":                c.Tools.CreateFile.Enabled,
 		"fs_create_dir":                 c.Tools.CreateDir.Enabled,
@@ -311,7 +312,7 @@ func Describe(c *config.Config, roots []string, serverVersion string) map[string
 		"fs_replace_regex":       "regex_replace",
 		"fs_apply_unified_patch": "unified_patch",
 	}
-	for _, name := range []string{"fs_list_dir", "fs_get_file_info", "fs_tail_file", "fs_read_file", "fs_search_text", "fs_find", "fs_replace_regex", "fs_apply_patch", "fs_apply_unified_patch", "fs_create_file", "fs_create_dir", "fs_replace_file", "fs_delete_file", "fs_delete_files", "fs_move_file", "fs_append_file", "md_outline", "md_read_section", "md_replace_section", "md_replace_section_heading", "md_insert_section", "md_append_section", "md_append_subsection", "json_outline", "json_keys", "json_get", "json_slice", "json_search", "json_validate", "jsonl_info", "jsonl_read", "jsonl_tail", "jsonl_filter", "jsonl_validate", "diagnostics_recent_slow_tools", "config_validate", "config_explain", "git_diff", "resource_read", "cmd_run_named", "cmd_run_sequence", "cmd_start_named", "cmd_job_status", "cmd_job_read", "cmd_job_cancel", "cmd_job_list", "cmd_run_argv"} {
+	for _, name := range []string{"fs_list_dir", "fs_get_file_info", "fs_tail_file", "fs_read_file", "fs_search_text", "fs_find", "fs_replace_regex", "fs_apply_patch", "fs_edit_lines", "fs_apply_unified_patch", "fs_create_file", "fs_create_dir", "fs_replace_file", "fs_delete_file", "fs_delete_files", "fs_move_file", "fs_append_file", "md_outline", "md_read_section", "md_replace_section", "md_replace_section_heading", "md_insert_section", "md_append_section", "md_append_subsection", "json_outline", "json_keys", "json_get", "json_slice", "json_search", "json_validate", "jsonl_info", "jsonl_read", "jsonl_tail", "jsonl_filter", "jsonl_validate", "diagnostics_recent_slow_tools", "config_validate", "config_explain", "git_diff", "resource_read", "cmd_run_named", "cmd_run_sequence", "cmd_start_named", "cmd_job_status", "cmd_job_read", "cmd_job_cancel", "cmd_job_list", "cmd_run_argv"} {
 		if tools[name] {
 			enabledCWDTools = append(enabledCWDTools, name)
 			continue

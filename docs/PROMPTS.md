@@ -18,7 +18,7 @@ Rules:
 - Search before reading broadly.
 - Read bounded line ranges, not huge files.
 - Do not request denied secret files.
-- For edits, call fs_apply_patch for scoped changes and verify with git_diff or an available test command.
+- For line-number anchored edits, prefer fs_edit_lines; otherwise call fs_apply_patch for scoped changes and verify with git_diff or an available test command.
 - Explain the diff before applying non-trivial changes.
 - After applying changes, call git_diff and a named verification command when available.
 - Do not use cmd_run_named unless the command is clearly relevant to the user's request.
@@ -27,13 +27,13 @@ Rules:
 ## Read-only inspection prompt
 
 ```text
-Inspect the project using personal MCP server without modifying files. Call tool_catalog_batch first for startup discovery. If resources are visible, read personal-mcp://guide/tools; otherwise call guide_list and guide_read. Then use fs_list_roots, project_info, workflow_list, fs_list_dir, fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file to understand the relevant files. Do not call fs_apply_patch, fs_create_file, fs_create_dir, or cmd_run_named. Summarize what you inspected and recommend next steps.
+Inspect the project using personal MCP server without modifying files. Call tool_catalog_batch first for startup discovery. If resources are visible, read personal-mcp://guide/tools; otherwise call guide_list and guide_read. Then use fs_list_roots, project_info, workflow_list, fs_list_dir, fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file to understand the relevant files. Do not call fs_edit_lines, fs_apply_patch, fs_create_file, fs_create_dir, or cmd_run_named. Summarize what you inspected and recommend next steps.
 ```
 
 ## Edit-and-verify prompt
 
 ```text
-Make the requested code change using personal MCP server. First call tool_catalog_batch for startup discovery. If resources are visible, read personal-mcp://guide/tools; otherwise call guide_list and guide_read. Then inspect the relevant files. Use fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful; use fs_apply_unified_patch only when server_info.features.unified_patch is true. Then call git_diff and run an available named verification command such as just-ci, just-test, go-test, or go-vet. Summarize files changed and verification results.
+Make the requested code change using personal MCP server. First call tool_catalog_batch for startup discovery. If resources are visible, read personal-mcp://guide/tools; otherwise call guide_list and guide_read. Then inspect the relevant files. Use fs_edit_lines for line-number anchored changes, fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful; use fs_apply_unified_patch only when server_info.features.unified_patch is true. Then call git_diff and run an available named verification command such as just-ci, just-test, go-test, or go-vet. Summarize files changed and verification results.
 ```
 
 ## Configuration
@@ -45,14 +45,14 @@ Example TOML:
 enabled = true
 description = "Safely inspect, patch, and verify code inside allowed roots."
 template = """
-Use personal MCP server carefully. Start with fs_list_roots, inspect before editing, use fs_apply_patch for scoped edits, or fs_apply_unified_patch only when server_info.features.unified_patch is true, then verify with git_diff and named commands.
+Use personal MCP server carefully. Start with fs_list_roots, inspect before editing, use fs_edit_lines for line-based edits, fs_apply_patch for scoped edits, or fs_apply_unified_patch only when server_info.features.unified_patch is true, then verify with git_diff and named commands.
 """
 ```
 
 ## Policy-first editing prompt
 
 ```text
-Use personal MCP server. First call tool_catalog_batch and policy_describe. If resources are visible, read personal-mcp://server, personal-mcp://policy, and personal-mcp://guide/tools; otherwise call guide_list and guide_read first. Stay inside configured roots. Prefer resources for read-only context. Search before reading broadly. For large files, use fs_get_file_info, fs_tail_file, fs_search_text, and bounded fs_read_file before requesting whole_file=true; only global config can raise max_read_bytes. Use fs_apply_patch for scoped edits, or fs_apply_unified_patch only when server_info.features.unified_patch is true. Treat fs_apply_patch warnings as review signals, not automatic failure, and only retry after re-reading when old text was not found. After edits, inspect git_diff and run an allowed verification command. If any operation requires approval, explain why it is needed and ask the local user to use personal-mcp-server approvals watch/list plus approve/deny; no native OS dialog is shown.
+Use personal MCP server. First call tool_catalog_batch and policy_describe. If resources are visible, read personal-mcp://server, personal-mcp://policy, and personal-mcp://guide/tools; otherwise call guide_list and guide_read first. Stay inside configured roots. Prefer resources for read-only context. Search before reading broadly. For large files, use fs_get_file_info, fs_tail_file, fs_search_text, and bounded fs_read_file before requesting whole_file=true; only global config can raise max_read_bytes. Use fs_edit_lines for line-number anchored changes, fs_apply_patch for scoped edits, or fs_apply_unified_patch only when server_info.features.unified_patch is true. Treat fs_apply_patch warnings as review signals, not automatic failure, and only retry after re-reading when old text was not found. After edits, inspect git_diff and run an allowed verification command. If any operation requires approval, explain why it is needed and ask the local user to use personal-mcp-server approvals watch/list plus approve/deny; no native OS dialog is shown.
 ```
 
 ## Dynamic command prompt

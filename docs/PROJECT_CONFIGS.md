@@ -144,7 +144,7 @@ Workflow aliases are exposed through the `workflow_list` tool.
 
 ## Protected and generated files
 
-Trusted project configs can harden edit operations for files that should not be changed casually. These rules apply to `fs_apply_patch`, `fs_apply_unified_patch`, `fs_replace_regex`, `fs_create_file`, and `fs_create_dir`.
+Trusted project configs can harden edit operations for files that should not be changed casually. These rules apply to `fs_edit_lines`, `fs_apply_patch`, `fs_apply_unified_patch`, `fs_replace_regex`, `fs_create_file`, and `fs_create_dir`.
 
 ```toml
 [protected_files]

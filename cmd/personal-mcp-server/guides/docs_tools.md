@@ -19,7 +19,7 @@ Prefer bounded file operations:
 
 - `fs_search_text`
 - `fs_search_text` supports per-call `max_file_size`, bounded by `limits.max_search_file_bytes`
-- `fs_get_file_info`
+- `fs_get_file_info` (`count_lines=true` returns exact line counts for line-anchored edit workflows)
 - `fs_tail_file`
 - `fs_read_file` with line ranges; for files over `limits.max_read_bytes`, avoid whole-file retries and use global config to raise the limit if needed
 - `fs_tree` and `fs_find` only when `server_info.features.native_find` is true
@@ -27,6 +27,7 @@ Prefer bounded file operations:
 
 Prefer scoped edits and review:
 
+- `fs_edit_lines` for line-number anchored inserts, replacements, and deletes with optional `line_starts_with` guards
 - `fs_apply_patch` (`expected_replacements` is a replacement cap; review warnings, and re-read before retrying zero-match edits)
 - `fs_apply_unified_patch` only when `server_info.features.unified_patch` is true
 - `fs_replace_regex` only when `server_info.features.regex_replace` is true

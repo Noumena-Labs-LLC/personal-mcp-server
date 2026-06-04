@@ -34,6 +34,7 @@ func TestIntegrationMCPHTTPFilesystemWorkflow(t *testing.T) {
 
 	toolsBody := postIntegrationMCP(t, server.URL, rt.port, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
 	assertContains(t, toolsBody, "fs_read_file")
+	assertContains(t, toolsBody, "fs_edit_lines")
 	assertContains(t, toolsBody, "tool_catalog")
 	assertContains(t, toolsBody, "tool_catalog_categories")
 	assertContains(t, toolsBody, "tool_catalog_category")

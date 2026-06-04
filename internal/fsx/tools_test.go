@@ -95,6 +95,23 @@ func TestGetFileInfoIncludesLargeFileGuidance(t *testing.T) {
 	}
 }
 
+func TestGetFileInfoCountsLinesExactlyWhenRequested(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	tools := NewTools(cfg, nil)
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("one\ntwo\nthree"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := tools.GetFileInfo(json.RawMessage(`{"path":"note.txt","count_lines":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, out)
+	if got, ok := m["line_count"].(int64); !ok || got != 3 {
+		t.Fatalf("expected exact line_count=3, got %#v", m["line_count"])
+	}
+}
+
 func TestReadFileWholeFileLargeFastFailsWithGuidance(t *testing.T) {
 	root := t.TempDir()
 	cfg := testConfig(root)
@@ -416,6 +433,93 @@ func TestApplyPatchCompactDiffForSingleLineInsertion(t *testing.T) {
 	}
 	if got := strings.Count(diff, "\n"); got > 30 {
 		t.Fatalf("expected compact diff, got %d lines", got)
+	}
+}
+
+func TestEditLinesReplaceRangeWithGuard(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	tools := NewTools(cfg, nil)
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma\ndelta\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"replace","line":2,"end_line":3,"line_starts_with":"beta","content":"beta updated\ngamma updated\n","dry_run":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, out)
+	if !resultBool(t, m, "changed") {
+		t.Fatalf("expected changed=true, got %#v", m)
+	}
+	if diff := resultString(t, m, "diff"); !strings.Contains(diff, "+beta updated") || !strings.Contains(diff, "-beta") {
+		t.Fatalf("expected replacement diff, got %q", diff)
+	}
+	out, err = tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"replace","line":2,"end_line":3,"line_starts_with":"beta","content":"beta updated\ngamma updated\n","create_backup":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = resultMap(t, out)
+	if got := resultInt(t, m, "new_line_count"); got != 4 {
+		t.Fatalf("expected new_line_count=4, got %d", got)
+	}
+	b, err := os.ReadFile(path) //nolint:gosec // test reads a file created in t.TempDir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b); got != "alpha\nbeta updated\ngamma updated\ndelta\n" {
+		t.Fatalf("unexpected edited content %q", got)
+	}
+	backup, err := os.ReadFile(path + ".bak") //nolint:gosec // test reads a file created in t.TempDir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(backup); got != "alpha\nbeta\ngamma\ndelta\n" {
+		t.Fatalf("unexpected backup content %q", got)
+	}
+}
+
+func TestEditLinesInsertBeforeAfterAndDelete(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	tools := NewTools(cfg, nil)
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"insert_before","line":2,"line_starts_with":"two","content":"one-point-five\n"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"insert_after","line":3,"line_starts_with":"two","content":"two-point-five\n"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"delete","line":5,"line_starts_with":"three"}`)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path) //nolint:gosec // test reads a file created in t.TempDir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b); got != "one\none-point-five\ntwo\ntwo-point-five\n" {
+		t.Fatalf("unexpected edited content %q", got)
+	}
+}
+
+func TestEditLinesRejectsGuardMismatchAndInvalidRange(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(root)
+	tools := NewTools(cfg, nil)
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("one\ntwo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"replace","line":2,"line_starts_with":"three","content":"two updated\n"}`)); err == nil || !strings.Contains(err.Error(), "does not start with") {
+		t.Fatalf("expected guard mismatch error, got %v", err)
+	}
+	if _, err := tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"delete","line":3}`)); err == nil || !strings.Contains(err.Error(), "beyond end of file") {
+		t.Fatalf("expected out-of-range error, got %v", err)
+	}
+	if _, err := tools.EditLines(json.RawMessage(`{"path":"note.txt","operation":"replace","line":2,"end_line":1,"content":"x\n"}`)); err == nil || !strings.Contains(err.Error(), "end_line must be >=") {
+		t.Fatalf("expected invalid range error, got %v", err)
 	}
 }
 

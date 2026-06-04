@@ -144,6 +144,13 @@ Supports optional dry_run previews. Requires expected_replacements to prevent ac
 Supports either one old/new replacement or an edits array for multiple hunks.
 """
 
+[tools.fs_edit_lines]
+enabled = true
+description = """
+Edit anchored line locations or line ranges inside configured roots.
+Supports replace, insert_before, insert_after, and delete with optional dry_run previews and a literal line_starts_with guard to validate the anchor line.
+"""
+
 [tools.fs_apply_unified_patch]
 enabled = true
 description = """
@@ -523,7 +530,7 @@ Rules:
 - Search before reading broadly.
 - Read bounded line ranges, not huge files.
 - Do not request denied secret files.
-- For edits, call fs_apply_patch or fs_apply_unified_patch for scoped changes and verify afterward.
+- For edits, call fs_edit_lines for line-based changes, fs_apply_patch for scoped text changes, or fs_apply_unified_patch for diff-based changes, then verify afterward.
 - Explain the diff before applying non-trivial changes.
 - After applying changes, call git_diff and a named verification command when available.
 - Do not use cmd_run_named or cmd_run_argv unless the command is clearly relevant to the user's request and allowed by policy or approved.
@@ -539,10 +546,10 @@ Workflow:
 1. Call tool_catalog_batch, then read personal-mcp://roots and personal-mcp://guide/tools when resources are available, or call guide_list and guide_read when they are not.
 2. Use fs_list_dir to understand the top-level structure.
 3. Use fs_search_text to find relevant files or symbols.
-4. Use fs_get_file_info before reading unknown files and fs_tail_file for recent log output.
+4. Use fs_get_file_info before reading unknown files. Set count_lines=true when you need an exact line count, and use fs_tail_file for recent log output.
 5. Use fs_read_file with bounded line ranges.
 
-Do not call fs_apply_patch, fs_create_file, cmd_run_named, or cmd_run_argv. Summarize what you inspected and recommend next steps.
+Do not call fs_edit_lines, fs_apply_patch, fs_create_file, cmd_run_named, or cmd_run_argv. Summarize what you inspected and recommend next steps.
 """
 
 [prompts.edit_and_verify]
@@ -555,7 +562,7 @@ Workflow:
 1. Call tool_catalog_batch and policy_describe, then read personal-mcp://guide/tools when resources are available or call guide_list and guide_read when they are not.
 2. Stay inside configured roots.
 3. Inspect relevant files with fs_search_text, fs_get_file_info, fs_tail_file, and fs_read_file.
-4. Use fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful, and review the diff.
+4. Use fs_edit_lines for line-based edits or fs_apply_patch for scoped edits, optionally with dry_run=true when a preview is useful, and review the diff.
 5. Apply the patch only when the intended change is clear.
 6. Call git_diff to review the final diff.
 7. Run an available named or policy-allowed verification command such as just-ci, just-test, go-test, go-vet, or cmd_run_argv when allowed.

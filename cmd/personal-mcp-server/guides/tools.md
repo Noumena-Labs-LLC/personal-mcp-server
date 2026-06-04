@@ -19,7 +19,7 @@ Read-only workflow:
 - Use `fs_list_roots` or `personal-mcp://roots`.
 - Use `fs_tree` for a compact bounded directory view when `server_info.features.native_find` is true.
 - Use `fs_find` to discover files when `server_info.features.native_find` is true; otherwise use `fs_search_text` for Go-native grep-like search before reading many files.
-- Use `fs_get_file_info` before reading unfamiliar files; it returns size, text sniffing, a line-count estimate, and large-file suggestions.
+- Use `fs_get_file_info` before reading unfamiliar files; it returns size, text sniffing, a line-count estimate, and large-file suggestions. Set `count_lines=true` when a workflow needs an exact line count without reading file contents into the model.
 - Use `fs_tail_file` for recent log output and `fs_read_file` with `start_line` and `max_lines` for source or targeted context. If a file is over `limits.max_read_bytes`, do not retry whole-file reads; use targeted search/ranges or ask the user to raise `[limits].max_read_bytes` in the global config (`~/.personal-mcp-server/config/config.toml`) and verify with `policy_describe`.
 - When traversal or JSONL tools skip hidden, denied, malformed, oversized, or escaped items, inspect `ignored_count`, `ignored_counts`, and `ignored_samples` instead of assuming the result set is exhaustive.
 - For Markdown files, prefer `md_outline` and `md_read_section` before reading whole documents.
@@ -28,7 +28,8 @@ Read-only workflow:
 Edit workflow:
 
 - Use `file_explain_policy` before risky edits.
-- Use `fs_apply_patch` for scoped edits. `dry_run=true` is optional when a preview is useful. `expected_replacements` caps replacements and may return warnings when the found count differs; treat warnings as review signals. If the old text is not found, re-read the exact target range before retrying. Use `fs_apply_unified_patch` only when `server_info.features.unified_patch` is true and `fs_replace_regex` only when `server_info.features.regex_replace` is true.
+- Use `fs_edit_lines` when the edit is naturally anchored to a specific line or line range. It supports `replace`, `insert_before`, `insert_after`, and `delete`, and `line_starts_with` can guard the anchor line against off-by-one mistakes.
+- Use `fs_apply_patch` for scoped exact-text edits. `dry_run=true` is optional when a preview is useful. `expected_replacements` caps replacements and may return warnings when the found count differs; treat warnings as review signals. If the old text is not found, re-read the exact target range before retrying. Use `fs_apply_unified_patch` only when `server_info.features.unified_patch` is true and `fs_replace_regex` only when `server_info.features.regex_replace` is true.
 - For Markdown docs, prefer `md_replace_section`, `md_replace_section_heading`, `md_insert_section`, `md_append_section`, or `md_append_subsection`; use `dry_run=true` only when a preview is useful. Use `md_replace_section_heading` for heading-only renames. When `md_replace_section` uses `include_heading=true`, the replacement content must begin with the existing heading line. Use `md_append_subsection` for child sections under an existing parent.
 - Use `fs_append_file` for simple append-only updates when a structured Markdown section tool does not fit.
 - Review compact diffs before applying.
