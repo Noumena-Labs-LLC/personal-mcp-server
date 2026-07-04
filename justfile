@@ -1,4 +1,5 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+export GOWORK := "off"
 
 APP := "personal-mcp-server"
 PKG := "./cmd/personal-mcp-server"

@@ -387,6 +387,7 @@ Read one personal-mcp:// resource by URI. Mirrors MCP resources for tool-only cl
 """
 
 # Prompt-required operations are approved through the local approval CLI/HTTP endpoints; no native OS dialog is shown.
+# When enabled = false, prompt-policy commands bypass the approval gate and execute automatically.
 [approval]
 enabled = true
 timeout_seconds = 120

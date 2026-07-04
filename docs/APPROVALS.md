@@ -37,3 +37,16 @@ remember_session_decisions = false
 ```
 
 Project configs cannot lengthen approval timeouts or bypass the global approval policy.
+
+## Disabling approval
+
+When `approval.enabled = false`, commands whose policy action is `prompt` are **allowed automatically** — the approval gate is bypassed and the command runs without waiting for a decision. This is the intended behavior: disabling approval means no approval is required.
+
+To disable approval globally:
+
+```toml
+[approval]
+enabled = false
+```
+
+Command policy rules with `action = "prompt"` remain meaningful — they define which commands *would* require approval if approval were re-enabled. Explicit `deny` rules are unaffected and continue to block commands regardless of this setting.
