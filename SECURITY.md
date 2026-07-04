@@ -6,7 +6,7 @@ This project is pre-1.0. Only the latest released version is considered supporte
 
 ## Reporting a vulnerability
 
-Do not post secrets, exploit details, private local paths, credentials, private documents, or sensitive logs in a public issue. Report privately to the project maintainer if this repository is published. Include:
+Do not post secrets, exploit details, private local paths, credentials, private documents, or sensitive logs in a public issue. Use [GitHub's private vulnerability reporting](https://github.com/Noumena-Labs-LLC/personal-mcp-server/security/advisories/new) to report privately. Include:
 
 - affected version
 - operating system
