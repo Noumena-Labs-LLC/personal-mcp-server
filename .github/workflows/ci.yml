@@ -12,8 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -40,7 +40,7 @@ jobs:
           install-go: false
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.1
           args: --timeout=5m
@@ -60,7 +60,7 @@ jobs:
           tar --exclude='./dist' --exclude='./bin' --exclude='./.tools' -czf "dist/personal-mcp-server-v${VERSION}.tar.gz" --transform "s,^.,personal-mcp-server-v${VERSION}," .
           (cd dist && shasum -a 256 "personal-mcp-server-v${VERSION}.tar.gz" > "personal-mcp-server-v${VERSION}.tar.gz.sha256")
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: personal-mcp-server-dist
           path: |
