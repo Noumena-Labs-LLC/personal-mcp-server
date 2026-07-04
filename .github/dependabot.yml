@@ -1,8 +1,4 @@
-# Disabled for early development to avoid Dependabot branch/PR noise.
-# To re-enable before open-sourcing, rename this file to:
-#   .github/dependabot.yml
-#
-# This quieter configuration groups updates and runs monthly.
+# Groups all dependency updates into one PR per ecosystem, runs monthly.
 version: 2
 updates:
   - package-ecosystem: gomod
