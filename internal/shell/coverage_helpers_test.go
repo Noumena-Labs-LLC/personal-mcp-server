@@ -143,8 +143,8 @@ func TestRunnerHelperBranches(t *testing.T) {
 	promptCfg := shellTestConfig(root)
 	promptCfg.CommandPolicy = config.CommandPolicyConfig{Default: "prompt"}
 	promptRunner := NewRunner(promptCfg, fsx.NewSandbox(promptCfg), nil, nil)
-	if _, err := promptRunner.RunArgv(json.RawMessage(`{"exec":"printf","args":["argv"],"cwd":"."}`)); err == nil || !strings.Contains(err.Error(), "approval is disabled") {
-		t.Fatalf("expected prompt policy to require approval, got %v", err)
+	if _, err := promptRunner.RunArgv(json.RawMessage(`{"exec":"printf","args":["argv"],"cwd":"."}`)); err != nil {
+		t.Fatalf("expected prompt policy with approval disabled to bypass and succeed, got %v", err)
 	}
 }
 

@@ -388,7 +388,7 @@ Recommended workflow:
 1. Call `server_info` and `policy_describe` first.
 2. Prefer `cmd_run_named` for exact known commands.
 3. Use `cmd_run_argv` for policy-covered dynamic commands such as Git.
-4. If a command is prompt-required, explain why it is needed and wait for local approval.
+4. If a command is prompt-required and `approval.enabled = true`, explain why it is needed and wait for local approval. If approval is disabled, prompt-required commands execute automatically.
 
 ## Policy discovery
 

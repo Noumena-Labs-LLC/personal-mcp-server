@@ -58,18 +58,17 @@ func (r *Runner) runArgv(ctx context.Context, raw json.RawMessage) (any, error) 
 	case policy.ActionDeny:
 		return nil, fmt.Errorf("command policy denied %s %s: %s", a.Exec, policy.JoinArgs(a.Args), decision.Rule)
 	case policy.ActionPrompt:
-		if !r.Cfg.Approval.Enabled || r.Approver == nil {
-			return nil, fmt.Errorf("command policy requires approval for %s %s, but approval is disabled", a.Exec, policy.JoinArgs(a.Args))
-		}
-		_, err := r.Approver.Request(ctx, approval.Request{
-			Kind:    "command",
-			Action:  "run",
-			Rule:    decision.Rule,
-			Summary: a.Exec + " " + policy.JoinArgs(a.Args),
-			Details: map[string]any{"exec": a.Exec, "args": a.Args, "cwd": a.Cwd, "resolved_cwd": cwd},
-		})
-		if err != nil {
-			return nil, err
+		if r.Cfg.Approval.Enabled && r.Approver != nil {
+			_, err := r.Approver.Request(ctx, approval.Request{
+				Kind:    "command",
+				Action:  "run",
+				Rule:    decision.Rule,
+				Summary: a.Exec + " " + policy.JoinArgs(a.Args),
+				Details: map[string]any{"exec": a.Exec, "args": a.Args, "cwd": a.Cwd, "resolved_cwd": cwd},
+			})
+			if err != nil {
+				return nil, err
+			}
 		}
 	default:
 		return nil, fmt.Errorf("command policy returned unknown action %q", decision.Action)
