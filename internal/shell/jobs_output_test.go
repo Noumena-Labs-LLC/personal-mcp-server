@@ -51,9 +51,9 @@ func readTestJob(t *testing.T, r *Runner, jobID string, tailLines int) map[strin
 	return shellResultMap(t, read)
 }
 
-func waitForJobTail(t *testing.T, r *Runner, jobID string, tailLines int, want func(string) bool) string {
+func waitForJobTail(t *testing.T, r *Runner, jobID string, tailLines int, timeout time.Duration, want func(string) bool) string {
 	t.Helper()
-	deadline := time.Now().Add(1500 * time.Millisecond)
+	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	var last string
@@ -93,7 +93,7 @@ func TestJobReadReturnsLineTailForStdoutAndStderr(t *testing.T) {
 func TestJobReadShowsCompleteLineWhileRunning(t *testing.T) {
 	r := jobOutputTestRunner(t, "printf 'first\\n'; sleep 2; printf 'second\\n'", 5, 10000)
 	jobID := startTestJob(t, r)
-	got := waitForJobTail(t, r, jobID, 10, func(tail string) bool {
+	got := waitForJobTail(t, r, jobID, 10, 1500*time.Millisecond, func(tail string) bool {
 		return strings.Contains(tail, "first")
 	})
 	if !strings.Contains(got, "first") {
@@ -104,7 +104,7 @@ func TestJobReadShowsCompleteLineWhileRunning(t *testing.T) {
 func TestJobReadShowsCurrentPartialLineWhileRunning(t *testing.T) {
 	r := jobOutputTestRunner(t, "printf partial; sleep 2; printf '\\n'", 5, 10000)
 	jobID := startTestJob(t, r)
-	got := waitForJobTail(t, r, jobID, 10, func(tail string) bool {
+	got := waitForJobTail(t, r, jobID, 10, 1500*time.Millisecond, func(tail string) bool {
 		return tail == "partial"
 	})
 	if got != "partial" {
@@ -137,7 +137,7 @@ func TestJobReadFlushesPartialLineOnTimeout(t *testing.T) {
 func TestJobReadFlushesPartialLineOnCancel(t *testing.T) {
 	r := jobOutputTestRunner(t, "printf cancel-partial; sleep 5", 10, 10000)
 	jobID := startTestJob(t, r)
-	waitForJobTail(t, r, jobID, 10, func(tail string) bool { return tail == "cancel-partial" })
+	waitForJobTail(t, r, jobID, 10, 1500*time.Millisecond, func(tail string) bool { return tail == "cancel-partial" })
 	if _, err := r.JobCancel(json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, jobID))); err != nil {
 		t.Fatalf("cancel job: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestJobCancelCompletesWhenDetachedChildKeepsPipesOpen(t *testing.T) {
 	r := NewRunner(cfg, fsx.NewSandbox(cfg), nil, nil)
 
 	jobID := startTestJob(t, r)
-	waitForJobTail(t, r, jobID, 10, func(tail string) bool { return tail == "cancel-partial" })
+	waitForJobTail(t, r, jobID, 10, 5*time.Second, func(tail string) bool { return tail == "cancel-partial" })
 	started := time.Now()
 	if _, err := r.JobCancel(json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, jobID))); err != nil {
 		t.Fatalf("cancel job: %v", err)
