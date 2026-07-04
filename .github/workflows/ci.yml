@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt is required for these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "2026.1"
+          install-go: false
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.1
+          args: --timeout=5m
+
+      - name: Vulnerability check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Build
+        run: go build -trimpath -ldflags="-s -w" -o bin/personal-mcp-server ./cmd/personal-mcp-server
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          VERSION="$(cat VERSION)"
+          tar --exclude='./dist' --exclude='./bin' --exclude='./.tools' -czf "dist/personal-mcp-server-v${VERSION}.tar.gz" --transform "s,^.,personal-mcp-server-v${VERSION}," .
+          (cd dist && shasum -a 256 "personal-mcp-server-v${VERSION}.tar.gz" > "personal-mcp-server-v${VERSION}.tar.gz.sha256")
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: personal-mcp-server-dist
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256

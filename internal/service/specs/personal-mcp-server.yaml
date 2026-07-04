@@ -1,0 +1,37 @@
+version: 1
+
+service:
+  id: personal-mcp-server
+  label: com.noumenalabs.personal-mcp-server
+  description: personal-mcp-server local MCP server
+
+process:
+  executable: "${install_bin}"
+  args:
+    - serve
+    - --config
+    - "${config_file}"
+  working_directory: "${home}"
+
+paths:
+  root: "${app_root}"
+  config_dir: "${app_root}/config"
+  config_file: "${config_file}"
+  token_file: "${app_root}/config/token"
+  trust_store: "${app_root}/config/trusted-projects.toml"
+  state_dir: "${app_root}/state"
+  logs_dir: "${app_root}/logs"
+  stdout_log: "${app_root}/logs/stdout.log"
+  stderr_log: "${app_root}/logs/stderr.log"
+
+restart:
+  policy: on_failure
+  delay_seconds: 2
+
+platforms:
+  darwin:
+    backend: launchd-user
+    manifest_path: "${home}/Library/LaunchAgents/${service.label}.plist"
+  linux:
+    backend: systemd-user
+    manifest_path: "${user_config_dir}/systemd/user/${service.id}.service"
