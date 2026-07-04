@@ -22,7 +22,9 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
 
       - name: Generate LCOV report
-        run: go tool cover -lcov coverage.out > coverage.lcov
+        run: |
+          go install github.com/jandelgado/gcov2lcov@latest
+          gcov2lcov -infile coverage.out -outfile coverage.lcov
 
       - uses: actions/upload-artifact@v4
         with:
