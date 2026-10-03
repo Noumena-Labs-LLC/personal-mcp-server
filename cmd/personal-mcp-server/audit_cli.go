@@ -74,9 +74,8 @@ func auditTail(args []string) {
 		fmt.Fprintf(os.Stderr, "audit tail is a snapshot; add --follow to keep watching: %s\n", path)
 		return
 	}
-	if err := followAudit(path, *filter, *interval); err != nil {
-		log.Fatal(err)
-	}
+	// followAudit polls until an error stops it, so it never returns nil.
+	log.Fatal(followAudit(path, *filter, *interval))
 }
 
 func addAuditFilterFlags(fs *flag.FlagSet) *auditFilter {
