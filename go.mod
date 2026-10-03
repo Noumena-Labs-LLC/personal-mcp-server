@@ -2,7 +2,7 @@ module github.com/noumena-labs-llc/personal-mcp-server
 
 go 1.26
 
-toolchain go1.26.4
+toolchain go1.26.8
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
