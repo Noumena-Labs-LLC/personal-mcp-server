@@ -47,7 +47,7 @@ Read [`DISCLAIMER.md`](DISCLAIMER.md), [`SECURITY.md`](SECURITY.md), and [`THREA
 This repo pins:
 
 - Go module version: `go 1.26`
-- Go toolchain: `go1.26.3`
+- Go toolchain: `go1.26.8`
 - MCP Go SDK: `github.com/modelcontextprotocol/go-sdk v1.6.0`
 
 ## Getting started
