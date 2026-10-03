@@ -36,13 +36,13 @@ jobs:
       - name: Staticcheck
         uses: dominikh/staticcheck-action@v1
         with:
-          version: "2026.1"
+          version: "2026.2.1"
           install-go: false
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.1
+          version: v2.14.0
           args: --timeout=5m
 
       - name: Vulnerability check
