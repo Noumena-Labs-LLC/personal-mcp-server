@@ -9,8 +9,8 @@ TOOLS_BIN := ".tools/bin"
 STATICCHECK := ".tools/bin/staticcheck"
 GOLANGCI_LINT := ".tools/bin/golangci-lint"
 GOVULNCHECK := ".tools/bin/govulncheck"
-STATICCHECK_VERSION := "2026.1"
-GOLANGCI_LINT_VERSION := "v2.12.1"
+STATICCHECK_VERSION := "2026.2.1"
+GOLANGCI_LINT_VERSION := "v2.14.0"
 GOVULNCHECK_VERSION := "latest"
 
 _default:
