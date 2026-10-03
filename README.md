@@ -48,7 +48,7 @@ This repo pins:
 
 - Go module version: `go 1.27`
 - Go toolchain: `go1.27.1`
-- MCP Go SDK: `github.com/modelcontextprotocol/go-sdk v1.6.0`
+- MCP Go SDK: `github.com/modelcontextprotocol/go-sdk v1.7.0`
 
 ## Getting started
 
