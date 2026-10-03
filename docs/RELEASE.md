@@ -5,8 +5,11 @@ Release artifacts are source snapshots, not git checkouts. They should build on 
 The public repository uses `dev` as the default integration branch and `main` as the production/release branch:
 
 ```text
-working branches -> PR -> dev -> PR -> main
+working branches -> PR -> dev
+release/vX.Y.Z (main + unreleased dev commits) -> PR -> main
 ```
+
+Releases reach `main` through a `release/vX.Y.Z` branch, not a `dev -> main` PR. Rebase merges into `main` give commits new IDs, so `dev` never contains `main`'s tip, and `main` requires PR branches to be up to date. A PR from `dev` can never meet that, and `dev` can't be brought up to date because it only accepts squash-merged PRs. For the same reason, ignore GitHub's "Compare & pull request" prompt for `main` after a release.
 
 ## Versioning
 
@@ -76,7 +79,7 @@ __pycache__/
 1. Update `VERSION`.
 2. Update the CLI/server version constant in `cmd/personal-mcp-server/main.go`.
 3. Keep `go.mod` and `go.sum` committed and consistent.
-4. Run:
+4. Run the commands below. Run `just tools` first if the pinned linter versions changed; `just ci` only installs tools that are missing.
 
 ```sh
 go mod tidy
@@ -112,22 +115,33 @@ personal-mcp-server client --config ~/.personal-mcp-server/config/config.toml pi
 
 1. Merge all release-bound working branches into `dev` through PRs.
 2. Confirm `dev` CI is green.
-3. Confirm the `dev -> main` release PR is current and CI is green.
-4. Merge the release PR into `main`.
-5. Tag `main`:
+3. Build the release branch from `main` plus the `dev` commits that aren't on `main` yet. `--cherry-pick` compares commits by content, so it skips `dev` commits whose rebased copies are already on `main`:
+
+```sh
+git fetch origin
+git rev-list --reverse --cherry-pick --right-only --no-merges origin/main...origin/dev  # should list only this release's commits
+git switch --no-track -c release/vX.Y.Z origin/main
+git cherry-pick $(git rev-list --reverse --cherry-pick --right-only --no-merges origin/main...origin/dev)
+git diff --stat origin/dev HEAD  # expect no output: same tree as dev
+git push -u origin release/vX.Y.Z
+```
+
+4. Open a `release/vX.Y.Z -> main` PR titled `Release vX.Y.Z` and confirm CI is green.
+5. Merge it with **Rebase and merge**, the only merge method `main` allows.
+6. Confirm `main` CI is green, then tag `main`:
 
 ```sh
 git fetch origin
 git checkout main
 git pull origin main
-git tag -a vX.Y.Z -m "personal-mcp-server vX.Y.Z"
+git tag -a vX.Y.Z -m "vX.Y.Z — <summary>"
 git push origin vX.Y.Z
 ```
 
-6. Create a GitHub Release named `personal-mcp-server vX.Y.Z`.
-7. Include concise public release notes that summarize the product, target users, and highlights.
-8. Attach source artifacts and checksums if desired, or rely on GitHub-generated source archives plus CI artifacts.
-9. After publishing, verify branch protections/rulesets, repository topics, issue templates, and funding metadata.
+7. Create a GitHub Release from the tag, named the same as the tag message (`vX.Y.Z — <summary>`).
+8. Include concise public release notes that summarize the product, target users, and highlights.
+9. Attach source artifacts and checksums if desired, or rely on GitHub-generated source archives plus CI artifacts.
+10. After publishing, verify branch protections/rulesets, repository topics, issue templates, and funding metadata.
 
 ## Suggested initial public release notes
 
