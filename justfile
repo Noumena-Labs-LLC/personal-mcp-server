@@ -11,10 +11,12 @@ APP := "personal-mcp-server"
 PKG := "./cmd/personal-mcp-server"
 CONFIG := "configs/example.toml"
 VERSION := `cat VERSION`
-TOOLS_BIN := ".tools/bin"
-STATICCHECK := ".tools/bin/staticcheck"
-GOLANGCI_LINT := ".tools/bin/golangci-lint"
-GOVULNCHECK := ".tools/bin/govulncheck"
+# Developer tools live in the shared ~/go/bin, not a repo-local copy, so the machine holds one
+# install of each. `just tools` installs the pinned versions there.
+TOOLS_BIN := env_var('HOME') + "/go/bin"
+STATICCHECK := TOOLS_BIN + "/staticcheck"
+GOLANGCI_LINT := TOOLS_BIN + "/golangci-lint"
+GOVULNCHECK := TOOLS_BIN + "/govulncheck"
 STATICCHECK_VERSION := "2026.2.2"
 GOLANGCI_LINT_VERSION := "v2.14.0"
 GOVULNCHECK_VERSION := "latest"
@@ -59,13 +61,13 @@ coverage-html:
 vet:
     go vet ./...
 
-# Install developer tools into the repo-local .tools/bin directory.
-# This keeps lint-check usable on a fresh checkout without requiring global installs.
+# Install the pinned developer tools into the shared ~/go/bin (replacing any other version there).
+# The lint and vulnerability targets run this automatically when a tool is missing.
 tools:
     mkdir -p {{TOOLS_BIN}}
-    GOBIN="$PWD/{{TOOLS_BIN}}" go install honnef.co/go/tools/cmd/staticcheck@{{STATICCHECK_VERSION}}
-    GOBIN="$PWD/{{TOOLS_BIN}}" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{GOLANGCI_LINT_VERSION}}
-    GOBIN="$PWD/{{TOOLS_BIN}}" go install golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}}
+    GOBIN="{{TOOLS_BIN}}" go install honnef.co/go/tools/cmd/staticcheck@{{STATICCHECK_VERSION}}
+    GOBIN="{{TOOLS_BIN}}" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{GOLANGCI_LINT_VERSION}}
+    GOBIN="{{TOOLS_BIN}}" go install golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}}
 
 toolchain-sync:
     go mod edit -toolchain={{GO_TOOLCHAIN}}
@@ -159,6 +161,3 @@ clean:
     find . -name '__pycache__' -type d -prune -exec rm -rf {} +
     find . -name '*.pyc' -delete
     find . -name '.DS_Store' -delete
-
-clean-tools:
-    rm -rf .tools
