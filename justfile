@@ -1,6 +1,12 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 export GOWORK := "off"
 
+# Go toolchain pin: the one value to edit when changing toolchains. Recipes run
+# under it regardless of the local GOTOOLCHAIN setting; `just toolchain-sync`
+# writes it into go.mod, which CI's setup-go reads.
+GO_TOOLCHAIN := "go1.27.2"
+export GOTOOLCHAIN := GO_TOOLCHAIN
+
 APP := "personal-mcp-server"
 PKG := "./cmd/personal-mcp-server"
 CONFIG := "configs/example.toml"
@@ -9,7 +15,7 @@ TOOLS_BIN := ".tools/bin"
 STATICCHECK := ".tools/bin/staticcheck"
 GOLANGCI_LINT := ".tools/bin/golangci-lint"
 GOVULNCHECK := ".tools/bin/govulncheck"
-STATICCHECK_VERSION := "2026.2.1"
+STATICCHECK_VERSION := "2026.2.2"
 GOLANGCI_LINT_VERSION := "v2.14.0"
 GOVULNCHECK_VERSION := "latest"
 
@@ -61,6 +67,12 @@ tools:
     GOBIN="$PWD/{{TOOLS_BIN}}" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{GOLANGCI_LINT_VERSION}}
     GOBIN="$PWD/{{TOOLS_BIN}}" go install golang.org/x/vuln/cmd/govulncheck@{{GOVULNCHECK_VERSION}}
 
+toolchain-sync:
+    go mod edit -toolchain={{GO_TOOLCHAIN}}
+
+toolchain-check:
+    grep -qx 'toolchain {{GO_TOOLCHAIN}}' go.mod || (echo "go.mod toolchain does not match GO_TOOLCHAIN={{GO_TOOLCHAIN}}; run 'just toolchain-sync'" >&2; exit 1)
+
 tools-check:
     test -x {{STATICCHECK}} || (echo "missing {{STATICCHECK}}; run 'just tools' or rerun this target to bootstrap" >&2; exit 1)
     test -x {{GOLANGCI_LINT}} || (echo "missing {{GOLANGCI_LINT}}; run 'just tools' or rerun this target to bootstrap" >&2; exit 1)
@@ -86,7 +98,7 @@ lint-check:
 
 check: fmt vet test lint
 
-ci: lint-check test-race integration-test smoke-test govulncheck
+ci: toolchain-check lint-check test-race integration-test smoke-test govulncheck
 
 govulncheck:
     test -x {{GOVULNCHECK}} || just tools
