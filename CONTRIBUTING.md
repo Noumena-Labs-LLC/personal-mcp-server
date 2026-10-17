@@ -20,7 +20,7 @@ Required:
 - `golangci-lint`, optional locally but installed by the repo tooling when needed
 - `govulncheck`, optional locally but installed by the repo tooling when needed
 
-The lint targets install pinned developer tools into `.tools/bin` automatically when needed. You can also bootstrap them explicitly:
+The lint targets install pinned developer tools into `~/go/bin` automatically when one is missing. You can also bootstrap them explicitly:
 
 ```sh
 just tools
