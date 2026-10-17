@@ -57,7 +57,7 @@ Prefer fixing findings over suppressing them. When a suppression is necessary, k
 
 ## Local tool bootstrap
 
-Run `just tools` to install pinned developer tools into `.tools/bin`. The lint and vulnerability-check targets auto-bootstrap these tools if they are missing.
+Run `just tools` to install pinned developer tools into the shared `~/go/bin`. The lint and vulnerability-check targets auto-bootstrap these tools if they are missing.
 
 
 ## Audit workflow
