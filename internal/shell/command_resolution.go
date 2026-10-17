@@ -130,7 +130,9 @@ func (r *Runner) finalCommandArgs(spec config.CommandSpec, extra []string, cwd s
 			}
 		}
 	}
-	args := make([]string, 0, len(spec.Args)+len(extra))
+	// Sized from spec.Args alone: extra comes from the caller, and summing two lengths in an
+	// allocation size is what CodeQL flags as a possible overflow. append grows it as needed.
+	args := make([]string, 0, len(spec.Args))
 	inserted := false
 	for _, arg := range spec.Args {
 		if arg == extraArgsPlaceholder {
