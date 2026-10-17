@@ -139,8 +139,14 @@ curl-prompts:
       -H "Content-Type: application/json" \
       -d '{"jsonrpc":"2.0","id":1,"method":"prompts/list","params":{}}'
 
+# GNU tar renames archive paths with --transform; macOS's bsdtar has no --transform and uses -s.
 dist:
     mkdir -p dist
+    if tar --version 2>/dev/null | grep -q 'GNU tar'; then \
+      rename=(--transform 's,^.,{{APP}}-v{{VERSION}},'); \
+    else \
+      rename=(-s ',^\.,{{APP}}-v{{VERSION}},'); \
+    fi; \
     tar \
       --exclude='./.git' \
       --exclude='./.tools' \
@@ -153,7 +159,7 @@ dist:
       --exclude='*/__pycache__' \
       --exclude='*.pyc' \
       --exclude='.DS_Store' \
-      -czf dist/{{APP}}-v{{VERSION}}.tar.gz --transform 's,^.,{{APP}}-v{{VERSION}},' .
+      -czf dist/{{APP}}-v{{VERSION}}.tar.gz "${rename[@]}" .
     (cd dist && shasum -a 256 {{APP}}-v{{VERSION}}.tar.gz > {{APP}}-v{{VERSION}}.tar.gz.sha256)
 
 clean:
