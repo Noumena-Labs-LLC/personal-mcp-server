@@ -47,7 +47,7 @@ Read [`DISCLAIMER.md`](DISCLAIMER.md), [`SECURITY.md`](SECURITY.md), and [`THREA
 This repo pins:
 
 - Go module version: `go 1.27`
-- Go toolchain: `go1.27.2` (set by `GO_TOOLCHAIN` in `justfile`; `just toolchain-sync` writes it into `go.mod`)
+- Go toolchain: `go1.27.3` (set by `GO_TOOLCHAIN` in `justfile`; `just toolchain-sync` writes it into `go.mod`)
 - MCP Go SDK: `github.com/modelcontextprotocol/go-sdk v1.7.0`
 
 ## Getting started

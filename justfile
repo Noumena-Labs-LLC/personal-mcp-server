@@ -4,7 +4,7 @@ export GOWORK := "off"
 # Go toolchain pin: the one value to edit when changing toolchains. Recipes run
 # under it regardless of the local GOTOOLCHAIN setting; `just toolchain-sync`
 # writes it into go.mod, which CI's setup-go reads.
-GO_TOOLCHAIN := "go1.27.2"
+GO_TOOLCHAIN := "go1.27.3"
 export GOTOOLCHAIN := GO_TOOLCHAIN
 
 APP := "personal-mcp-server"
